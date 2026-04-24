@@ -1,1 +1,241 @@
-/* InstaChar — CSS is injected into shadow DOM, this file is intentionally minimal */
+/* InstaChar v0.6.0 — Instagram-style UI for SillyTavern [FIXED ALL ISSUES] */
+
+:root {
+    --ic-bg: #000;
+    --ic-bg-2: #0a0a0a;
+    --ic-bg-3: #121212;
+    --ic-border: #262626;
+    --ic-text: #f5f5f5;
+    --ic-text-2: #a8a8a8;
+    --ic-text-3: #737373;
+    --ic-primary: #0095f6;
+    --ic-primary-hover: #1877f2;
+    --ic-danger: #ed4956;
+    --ic-story-grad: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+    --ic-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Sarabun", "Noto Sans Thai", sans-serif;
+}
+
+/* Floating Action Button — uses !important to override SillyTavern styles */
+#ic-fab {
+    position: fixed !important;
+    bottom: 90px !important;
+    right: 16px !important;
+    width: 52px !important;
+    height: 52px !important;
+    border-radius: 14px !important;
+    background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%) !important;
+    color: white !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    z-index: 99999 !important;
+    box-shadow: 0 4px 20px rgba(220, 39, 67, 0.5), 0 0 0 2px rgba(255,255,255,0.08) !important;
+    transition: transform 0.2s, box-shadow 0.2s !important;
+    user-select: none !important;
+    touch-action: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+}
+#ic-fab:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 24px rgba(220, 39, 67, 0.7), 0 0 0 2px rgba(255,255,255,0.15) !important;
+}
+#ic-fab.ic-dragging {
+    transform: scale(1.1) !important;
+    cursor: grabbing !important;
+    box-shadow: 0 8px 32px rgba(220, 39, 67, 0.8) !important;
+}
+#ic-fab svg {
+    width: 28px !important;
+    height: 28px !important;
+    pointer-events: none;
+}
+#ic-fab.ic-pulse {
+    animation: ic-pulse 1.2s ease-in-out;
+}
+@keyframes ic-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.18); box-shadow: 0 0 0 14px rgba(220, 39, 67, 0.15) !important; }
+}
+#ic-badge {
+    position: absolute !important;
+    top: -4px !important;
+    right: -4px !important;
+    background: #ff2d55 !important;
+    color: white !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #000;
+    pointer-events: none;
+}
+
+.ic-hidden { display: none !important; }
+
+/* Overlay */
+#ic-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(6px);
+    z-index: 99998;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--ic-font);
+    animation: ic-fadein 0.25s ease-out;
+}
+@keyframes ic-fadein { from { opacity: 0; } to { opacity: 1; } }
+
+#ic-phone {
+    width: min(420px, 96vw);
+    height: min(820px, 94vh);
+    background: var(--ic-bg);
+    border-radius: 28px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    color: var(--ic-text);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    animation: ic-popin 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes ic-popin {
+    from { transform: scale(0.92); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+.ic-statusbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 18px 4px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ic-text);
+}
+.ic-status-icons { display: flex; gap: 6px; font-size: 11px; }
+
+.ic-topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--ic-border);
+}
+.ic-topbar-title {
+    font-family: "Billabong", "Pacifico", "Dancing Script", cursive;
+    font-size: 28px;
+    font-weight: 400;
+    letter-spacing: 0.5px;
+}
+.ic-topbar-actions { display: flex; gap: 8px; }
+.ic-icon-btn {
+    background: transparent;
+    border: none;
+    color: var(--ic-text);
+    font-size: 18px;
+    cursor: pointer;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    transition: background 0.15s;
+}
+.ic-icon-btn:hover { background: var(--ic-bg-3); }
+
+#ic-screen {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--ic-border) transparent;
+}
+#ic-screen::-webkit-scrollbar { width: 6px; }
+#ic-screen::-webkit-scrollbar-thumb { background: var(--ic-border); border-radius: 3px; }
+
+.ic-nav {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    border-top: 1px solid var(--ic-border);
+    padding: 8px 0 10px;
+    background: var(--ic-bg);
+}
+.ic-nav-item {
+    background: transparent;
+    border: none;
+    color: var(--ic-text);
+    cursor: pointer;
+    padding: 6px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.9;
+    transition: transform 0.15s;
+}
+.ic-nav-item svg { width: 24px; height: 24px; }
+.ic-nav-item.active { transform: scale(1.15); }
+.ic-nav-item.active svg { stroke-width: 2.5; }
+
+.ic-stories {
+    display: flex;
+    gap: 14px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--ic-border);
+    scrollbar-width: none;
+}
+.ic-stories::-webkit-scrollbar { display: none; }
+.ic-story { flex-shrink: 0; width: 66px; cursor: pointer; text-align: center; }
+.ic-story-ring {
+    width: 62px; height: 62px;
+    border-radius: 50%;
+    background: var(--ic-story-grad);
+    padding: 2px;
+    margin: 0 auto;
+}
+.ic-story-ring img {
+    width: 100%; height: 100%;
+    border-radius: 50%;
+    border: 2px solid var(--ic-bg);
+    object-fit: cover;
+    display: block;
+}
+.ic-story-name {
+    font-size: 11px;
+    margin-top: 4px;
+    color: var(--ic-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ic-post { border-bottom: 1px solid var(--ic-border); padding-bottom: 8px; margin-bottom: 4px; }
+.ic-post-head { display: flex; align-items: center; padding: 10px 14px; gap: 10px; }
+.ic-post-user { display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 1; }
+.ic-avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--ic-border);
+}
+.ic-post-user-info { display: flex; flex-direction: column; line-height: 1.15; }
+.ic-username { font-weight: 600; font-size: 14px; }
+.ic-post-mood { font-size: 11px; color: var(--ic-text-3); }
+.ic-post-menu { cursor: pointer; font-size: 20px; padding: 4px 8px; line-height: 1; }
+
+.ic-post-image-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background: var(--ic-bg-3);
+    overflow: hidden;
+    cursor: pointer;
+}
+.ic-post-image { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ic-post
