@@ -1,0 +1,12 @@
+{
+    "display_name": "📱 InstaChar — Character Instagram",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "chonnicha7075-creator",
+    "version": "1.0.0",
+    "homePage": "https://github.com/chonnicha7075-creator/Instachar",
+    "auto_update": true
+}

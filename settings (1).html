@@ -1,0 +1,185 @@
+<div class="instachar-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>📱 InstaChar — Character Instagram</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+
+            <h4>InstaChar settings</h4>
+
+            <div class="instachar-row">
+                <div>
+                    <label for="instachar-toggle-icon">Show floating icon</label>
+                    <div class="hint">The Instagram icon in the corner</div>
+                </div>
+                <label class="instachar-toggle">
+                    <input type="checkbox" id="instachar-toggle-icon" checked />
+                    <span class="instachar-toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label for="instachar-toggle-autopost">Auto-post by characters</label>
+                    <div class="hint">Characters post based on their scene in RP</div>
+                </div>
+                <label class="instachar-toggle">
+                    <input type="checkbox" id="instachar-toggle-autopost" checked />
+                    <span class="instachar-toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label for="instachar-toggle-ambient">Ambient activity ✨</label>
+                    <div class="hint">NPCs occasionally comment/like/DM user</div>
+                </div>
+                <label class="instachar-toggle">
+                    <input type="checkbox" id="instachar-toggle-ambient" checked />
+                    <span class="instachar-toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label for="instachar-toggle-npc">Detect NPCs from story</label>
+                    <div class="hint">Auto-create IG profiles for NPCs mentioned in RP (not just active bot)</div>
+                </div>
+                <label class="instachar-toggle">
+                    <input type="checkbox" id="instachar-toggle-npc" checked />
+                    <span class="instachar-toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>Art style</label>
+                    <div class="hint">Default style for AI-generated images</div>
+                </div>
+                <select id="instachar-art-style" class="menu_button" style="padding: 4px 8px;">
+                    <option value="anime">Anime/Manhwa</option>
+                    <option value="realistic">Realistic photo</option>
+                    <option value="aesthetic">Aesthetic/moody</option>
+                    <option value="minimal">Minimal/clean</option>
+                </select>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>Post frequency: <span id="instachar-chance-val">50%</span></label>
+                    <div class="hint">Chance of posting per AI response</div>
+                </div>
+                <input type="range" id="instachar-chance-slider" min="10" max="100" step="5" value="50" style="width:120px" />
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>Open InstaChar</label>
+                    <div class="hint">Open the app manually</div>
+                </div>
+                <button id="instachar-open-btn" class="menu_button" type="button">Open</button>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>Find the icon</label>
+                    <div class="hint">Flash red if you can't find it</div>
+                </div>
+                <button id="instachar-find-btn" class="menu_button" type="button">🔍 Find</button>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>Reset icon position</label>
+                    <div class="hint">Move icon back to default position</div>
+                </div>
+                <button id="instachar-reset-pos-btn" class="menu_button" type="button">Reset</button>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>Reset current chat's IG data</label>
+                    <div class="hint">Delete posts, DMs, profiles for this chat only</div>
+                </div>
+                <button id="instachar-reset-chat-btn" class="menu_button instachar-danger-btn" type="button">Reset chat</button>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>Reset ALL data</label>
+                    <div class="hint">Delete everything (cannot be undone)</div>
+                </div>
+                <button id="instachar-reset-all-btn" class="menu_button instachar-danger-btn" type="button">Reset all</button>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>About</label>
+                    <div class="hint">InstaChar v1.0.0 · by chonnicha7075-creator</div>
+                </div>
+                <a href="https://github.com/chonnicha7075-creator/Instachar" target="_blank" rel="noopener" class="menu_button" style="text-decoration: none;">GitHub ↗</a>
+            </div>
+
+            <div class="instachar-row" style="flex-direction:column;align-items:stretch;margin-top:12px;padding-top:12px;border-top:1px solid rgba(220,39,67,0.15)">
+                <label style="font-size:11px;opacity:0.7;margin-bottom:4px">Status log</label>
+                <pre id="instachar-debug-log" style="font-size:10px;background:rgba(220,39,67,0.08);padding:8px;border-radius:6px;margin:0;white-space:pre-wrap;word-wrap:break-word;color:#bc1888;max-height:180px;overflow-y:auto;font-family:ui-monospace,monospace"></pre>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<style>
+.instachar-settings .instachar-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    gap: 12px;
+    border-bottom: 1px solid rgba(220, 39, 67, 0.08);
+}
+.instachar-settings .instachar-row:last-child { border-bottom: none; }
+.instachar-settings .hint {
+    font-size: 11px;
+    opacity: 0.7;
+    margin-top: 2px;
+}
+.instachar-settings .instachar-toggle {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+}
+.instachar-settings .instachar-toggle input { opacity: 0; width: 0; height: 0; }
+.instachar-settings .instachar-toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: #ccc;
+    border-radius: 24px;
+    transition: .3s;
+}
+.instachar-settings .instachar-toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: .3s;
+}
+.instachar-settings .instachar-toggle input:checked + .instachar-toggle-slider {
+    background: linear-gradient(45deg, #f09433, #dc2743, #bc1888);
+}
+.instachar-settings .instachar-toggle input:checked + .instachar-toggle-slider:before {
+    transform: translateX(20px);
+}
+.instachar-settings .instachar-danger-btn {
+    color: #dc2743 !important;
+    border-color: #dc2743 !important;
+}
+</style>
