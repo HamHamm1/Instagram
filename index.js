@@ -1,11 +1,11 @@
-/* InstaChar v0.12.0 — One Call = $5: Mega Batch (posts+comments+gossip in 1 call) */
+/* InstaChar v0.13.0 — Fix: floating icon migration + flux model + gossip name parser */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.12.0";
+const VERSION = "0.13.0";
 
 // ✅ Role detection mapping
 const ROLE_KEYWORDS = {
@@ -36,6 +36,7 @@ const DEFAULT_GLOBAL = {
     cooldownEnabled: true,     // 🆕 v0.12: prevent rapid-fire $5 calls
     cooldownSeconds: 30,
     llmStats: { totalCalls: 0, sessionCalls: 0, sessionStart: 0, lastTag: "", lastCallAt: 0 },
+    _lastVersion: "",  // 🆕 v0.13: tracks version for migrations (forces icon visible after upgrade)
 };
 
 // 🆕 v0.12 — All modes use 1 LLM call. Modes only differ in HOW MUCH content packed into that call.
@@ -217,46 +218,54 @@ function sanitizeUsername(name) {
     return name.toLowerCase().replace(/[^a-z0-9_\u0e00-\u0e7f]/g, "").slice(0, 20) || "user";
 }
 
-// 🎨 5 Art Styles — user can pick favorite in settings
+// 🎨 5 Art Styles (v0.13 — switched to default flux model + cleaner prompts)
+// Pollinations now defaults to flux which gives much better anatomy than flux-anime
+// We embed "anime style" in the prompt itself rather than relying on a model suffix
 const ART_STYLES = {
     "modern": {
         name: "🎨 Modern Anime",
-        desc: "Makoto Shinkai / Kyoto Animation — สวยฟ้าๆ cinematic",
-        suffix: ", makoto shinkai style, kyoto animation, ufotable, mappa studio, soft cinematic lighting, vibrant colors, masterpiece, best quality, ultra detailed, sharp lineart, official art, beautiful detailed face",
-        model: "flux-anime",
-        previewPrompt: "beautiful anime boy portrait, soft sunset light, dreamy bokeh, blue sky background",
+        desc: "Makoto Shinkai vibe — สวย cinematic",
+        prefix: "anime artwork, ",
+        suffix: ", makoto shinkai style, beautiful detailed face, perfect anatomy, soft cinematic lighting, masterpiece, high quality",
+        model: "flux",
+        previewPrompt: "young man portrait, soft sunset bedroom light, peaceful expression",
     },
     "ghibli": {
-        name: "🌿 Studio Ghibli",
-        desc: "Miyazaki / Ghibli — อบอุ่น watercolor วินเทจ",
-        suffix: ", studio ghibli style, hayao miyazaki, watercolor anime aesthetic, warm soft natural light, hand-painted background, nostalgic atmosphere, beautiful detailed scenery, masterpiece",
-        model: "flux-anime",
-        previewPrompt: "ghibli style boy in countryside, warm afternoon light, watercolor sky",
+        name: "🌿 Ghibli",
+        desc: "Miyazaki watercolor อบอุ่น",
+        prefix: "studio ghibli anime, ",
+        suffix: ", hayao miyazaki style, watercolor painting, warm natural light, hand-drawn, perfect anatomy, beautiful scenery, masterpiece",
+        model: "flux",
+        previewPrompt: "young man in countryside afternoon, warm watercolor sky",
     },
     "shoujo": {
         name: "✨ Shoujo / BL",
-        desc: "BL/Shoujo — pastel sparkly อ่อนหวาน",
-        suffix: ", shoujo manga style, BL aesthetic, soft pastel colors, sparkles, dreamy romantic atmosphere, beautiful detailed face, glossy reflective eyes, blush, flower petals, masterpiece",
-        model: "flux-anime",
-        previewPrompt: "shoujo style handsome boy, soft pink lighting, sparkles, gentle smile",
+        desc: "BL pastel sparkly อ่อนหวาน",
+        prefix: "shoujo manga anime, ",
+        suffix: ", BL aesthetic, soft pastel colors, sparkles, beautiful detailed face, perfect anatomy, glossy eyes, blush, romantic atmosphere, masterpiece",
+        model: "flux",
+        previewPrompt: "handsome young man portrait, soft pink lighting, gentle smile",
     },
     "cyberpunk": {
-        name: "🌃 Cyberpunk Neon",
-        desc: "Tokyo neon / cyberpunk — เสน่ห์เมืองดึก",
-        suffix: ", cyberpunk anime style, neon lights, tokyo night street, rain reflections, blade runner aesthetic, vibrant magenta cyan purple, detailed urban background, dramatic lighting, masterpiece",
-        model: "flux-anime",
-        previewPrompt: "cyberpunk anime boy, neon tokyo street at night, rain, glowing signs",
+        name: "🌃 Cyberpunk",
+        desc: "Tokyo neon เมืองดึก",
+        prefix: "cyberpunk anime, ",
+        suffix: ", neon tokyo night, rain reflections, vibrant colors, perfect anatomy, detailed face, dramatic lighting, masterpiece",
+        model: "flux",
+        previewPrompt: "young man on neon tokyo street at night, rain, glowing signs",
     },
     "manga": {
         name: "📖 Manga B&W",
-        desc: "Manga ขาวดำ — screentone เส้นคม",
-        suffix: ", manga style, black and white, screentone halftone, ink illustration, detailed sharp lineart, dramatic shadows and contrast, manga panel aesthetic, masterpiece",
-        model: "flux-anime",
-        previewPrompt: "black and white manga boy portrait, dramatic light, screentone shading",
+        desc: "Manga ขาวดำ screentone",
+        prefix: "manga illustration, ",
+        suffix: ", black and white, ink drawing, screentone shading, perfect anatomy, detailed sharp lineart, dramatic contrast, masterpiece",
+        model: "flux",
+        previewPrompt: "young man portrait, dramatic light, manga style",
     },
 };
 
-const ANIME_NEGATIVE = "realistic, photo, photograph, real person, 3d render, ugly, deformed, low quality, blurry, watermark, text, signature";
+// Stronger negative — fixes "missing arms, deformed hands, broken anatomy" issues
+const ANIME_NEGATIVE = "deformed, mutated, extra limbs, missing limbs, missing arms, missing hands, bad hands, bad anatomy, malformed, ugly, blurry, low quality, watermark, text, signature, realistic photo, 3d render, distorted face";
 
 const imageCache = new Map();
 function makeImageUrl(prompt, seed) {
@@ -266,21 +275,22 @@ function makeImageUrl(prompt, seed) {
     const cacheKey = styleKey + "_" + (prompt || "default") + "_" + seed;
     if (imageCache.has(cacheKey)) return imageCache.get(cacheKey);
     const cleanPrompt = (prompt || "aesthetic mood scene").replace(/(real|realistic|photo(graph)?|3d render)/gi, "");
-    const finalPrompt = cleanPrompt + style.suffix;
+    const finalPrompt = (style.prefix || "") + cleanPrompt + (style.suffix || "");
     const p = encodeURIComponent(finalPrompt);
     const neg = encodeURIComponent(ANIME_NEGATIVE);
-    const url = "https://image.pollinations.ai/prompt/" + p + "?width=720&height=720&nologo=true&model=" + style.model + "&negative=" + neg + "&seed=" + (seed || Math.floor(Math.random() * 99999));
+    // 512x512 — flux renders better at standard sizes; enhance=true asks pollinations to improve prompt
+    const url = "https://image.pollinations.ai/prompt/" + p + "?width=512&height=512&nologo=true&model=" + style.model + "&enhance=true&negative=" + neg + "&seed=" + (seed || Math.floor(Math.random() * 99999));
     if (imageCache.size > 80) { const firstKey = imageCache.keys().next().value; imageCache.delete(firstKey); }
     imageCache.set(cacheKey, url);
     return url;
 }
 
-// preview helper for settings UI (no caching, fresh seed)
 function makePreviewUrl(styleKey) {
     const style = ART_STYLES[styleKey] || ART_STYLES.modern;
-    const p = encodeURIComponent(style.previewPrompt + style.suffix);
+    const finalPrompt = (style.prefix || "") + style.previewPrompt + (style.suffix || "");
+    const p = encodeURIComponent(finalPrompt);
     const neg = encodeURIComponent(ANIME_NEGATIVE);
-    return "https://image.pollinations.ai/prompt/" + p + "?width=400&height=400&nologo=true&model=" + style.model + "&negative=" + neg + "&seed=" + (42 + Object.keys(ART_STYLES).indexOf(styleKey));
+    return "https://image.pollinations.ai/prompt/" + p + "?width=400&height=400&nologo=true&model=" + style.model + "&enhance=true&negative=" + neg + "&seed=" + (42 + Object.keys(ART_STYLES).indexOf(styleKey));
 }
 
 function parseJson(text) {
@@ -728,11 +738,17 @@ async function generateMegaBatch(sceneContext, options) {
 3️⃣ NPC↔NPC PRIVATE GOSSIP DM (BONUS — also in same response!)
    Pick 2 characters from roster who would secretly DM each other about this scene.
    Generate 5-8 messages alternating between them.
-   Each message: Thai, short (3-15 words), in character, gossip/secrets/banter feel.
+   Each message: Thai, short (3-15 words), in character with their EXACT pronouns/slang.
    They might gossip about ${userName} or ${card ? card.name : "the protagonist"}.
-   Make it FEEL like real private gossip.` : "";
+   Make it FEEL like real private gossip.
 
-    const gossipField = includeGossip ? `,"gossip":{"npcIdA":"id_xxx","npcIdB":"id_yyy","messages":[{"from":"A","text":"thai"}]}` : "";
+   ⚠️ CRITICAL FORMAT RULE:
+   - Pick 2 NPCs and put their IDs in "npcIdA" and "npcIdB" fields
+   - In each message, "speakerId" MUST be the EXACT id (e.g. "id_abc123") of who's speaking
+   - Use "speakerId" matching either npcIdA or npcIdB — alternate them naturally
+   - DO NOT use "A"/"B" or character names as speakerId — only the actual id` : "";
+
+    const gossipField = includeGossip ? `,"gossip":{"npcIdA":"id_xxx","npcIdB":"id_yyy","messages":[{"speakerId":"id_xxx","text":"thai"},{"speakerId":"id_yyy","text":"thai"}]}` : "";
 
     const prompt = `[MEGA BATCH — Maximum content per LLM call]
 
@@ -817,7 +833,7 @@ Respond ONLY with minified JSON (no markdown):
             created.push(post);
         }
 
-        // 🆕 Gossip came in same response too (still 1 call total!)
+        // 🆕 v0.13: Robust gossip parser — handles speakerId, from, name, username, or A/B
         let gossipResult = null;
         if (includeGossip && parsed.gossip && Array.isArray(parsed.gossip.messages)) {
             const npcA = findNpc(parsed.gossip.npcIdA) || data.npcs[0];
@@ -827,13 +843,42 @@ Respond ONLY with minified JSON (no markdown):
                 const pairKey = [npcA.id, npcB.id].sort().join("__");
                 data.npcDms[pairKey] = data.npcDms[pairKey] || { participants: [npcA.id, npcB.id], messages: [] };
                 const baseTs = Date.now();
+
+                // 🆕 Smart speaker resolver — tries multiple LLM output formats
+                const resolveSpeaker = (m, idx) => {
+                    const raw = (m.speakerId || m.from || m.author || m.npcId || "").toString().trim();
+                    if (!raw) {
+                        // No speaker info at all — fallback to alternation (A first, B second, ...)
+                        return idx % 2 === 0 ? npcA : npcB;
+                    }
+                    // Match by id (most reliable)
+                    if (raw === npcA.id) return npcA;
+                    if (raw === npcB.id) return npcB;
+                    // Match by literal A/B
+                    const upper = raw.toUpperCase();
+                    if (upper === "A" || upper === "NPCA" || upper === "NPC_A") return npcA;
+                    if (upper === "B" || upper === "NPCB" || upper === "NPC_B") return npcB;
+                    // Match by username (with or without @)
+                    const cleanRaw = raw.replace(/^@/, "").toLowerCase();
+                    if (cleanRaw === (npcA.username || "").toLowerCase()) return npcA;
+                    if (cleanRaw === (npcB.username || "").toLowerCase()) return npcB;
+                    // Match by name / displayName (loose contains)
+                    const aNames = [npcA.name, npcA.displayName].filter(Boolean).map(s => s.toLowerCase());
+                    const bNames = [npcB.name, npcB.displayName].filter(Boolean).map(s => s.toLowerCase());
+                    const rawLower = raw.toLowerCase();
+                    if (aNames.some(n => rawLower === n || rawLower.includes(n) || n.includes(rawLower))) return npcA;
+                    if (bNames.some(n => rawLower === n || rawLower.includes(n) || n.includes(rawLower))) return npcB;
+                    // Last resort: alternate
+                    return idx % 2 === 0 ? npcA : npcB;
+                };
+
                 for (let i = 0; i < parsed.gossip.messages.length; i++) {
                     const m = parsed.gossip.messages[i];
                     if (!m.text) continue;
-                    const fromNpc = m.from === "A" ? npcA : npcB;
+                    const fromNpc = resolveSpeaker(m, i);
                     data.npcDms[pairKey].messages.push({
                         npcId: fromNpc.id,
-                        authorName: fromNpc.displayName,
+                        authorName: fromNpc.displayName || fromNpc.name,
                         text: m.text,
                         timestamp: baseTs + i * 1000,
                     });
@@ -2084,6 +2129,9 @@ function renderDMList() {
             }).join("")
         ) : (
             gossipKeys.length === 0 ? '<div class="empty-small" style="padding:30px 20px"><div style="font-size:32px;margin-bottom:8px">👀</div>ยังไม่มีคนนินทาใคร<br/><span style="font-size:11px;color:#737373">ตอน NPCs โพสต์เยอะๆ จะแอบ DM กันเอง</span></div>' :
+            (`<div style="padding:6px 14px;display:flex;justify-content:flex-end;border-bottom:1px solid #1a1a1a">
+                <button id="clear-all-gossip" style="background:transparent;border:1px solid #ed4956;color:#ed4956;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">🧹 ล้างทั้งหมด</button>
+            </div>` +
             gossipKeys.map(key => {
                 const thread = data.npcDms[key];
                 const a = findNpc(thread.participants[0]);
@@ -2102,7 +2150,7 @@ function renderDMList() {
                     </div>
                     <button class="dm-item-del" data-clear-gossip="${key}" title="ลบ">🗑</button>
                 </div>`;
-            }).join("")
+            }).join(""))
         )}
     </div>`;
 
@@ -2149,6 +2197,17 @@ function renderDMList() {
                 renderDMList();
             });
         });
+        // 🆕 v0.13: clear-all-gossip — useful to wipe corrupted data from older versions
+        const clearAllBtn = shadowRoot.getElementById("clear-all-gossip");
+        if (clearAllBtn) {
+            clearAllBtn.addEventListener("click", () => {
+                if (!confirm("ลบ gossip ทั้งหมด? (แนะนำถ้าข้อมูลเก่าจาก v0.12 ชื่อผู้พูดผิด)")) return;
+                data.npcDms = {};
+                save();
+                renderDMList();
+                toast("✓ ล้าง gossip แล้ว — ครั้งหน้าจะถูกแล้ว");
+            });
+        }
     }
 }
 
@@ -2696,10 +2755,31 @@ function attachDelegation() {
 jQuery(async () => {
     log("InstaChar v" + VERSION + " init...");
     try {
-        getGlobal();
+        const g = getGlobal();
+
+        // 🆕 v0.13 migration: force-show icon on upgrade so users always see it after install
+        if (g._lastVersion !== VERSION) {
+            log(`Upgrade detected: ${g._lastVersion || "fresh install"} → ${VERSION} — force-showing icon`);
+            g.iconVisible = true;       // always make icon visible after upgrade
+            g.iconPos = null;           // reset position so it lands at default top: 150px right: 16px
+            g._lastVersion = VERSION;
+            save();
+        }
+
         attachDelegation();
         await loadSettingsUI();
         mountUI();
+
+        // 🆕 v0.13: retry mount if shadow DOM didn't initialize properly
+        setTimeout(() => {
+            if (!shadowRoot || !shadowRoot.getElementById("floater")) {
+                log("⚠️ Floater missing — retrying mountUI()", true);
+                try { mountUI(); } catch (e) { log("retry failed: " + e.message, true); }
+            } else {
+                log("✓ Floater confirmed mounted");
+            }
+        }, 1500);
+
         if (eventSource && event_types) {
             try {
                 if (event_types.CHAT_CHANGED) eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
@@ -2707,6 +2787,6 @@ jQuery(async () => {
             } catch (e) { log("event bind: " + e.message, true); }
         }
         if (getGlobal().ambientEnabled) scheduleAmbient();
-        log("✅ Ready! v" + VERSION + " — One Call = $5 (Mega Batch packs everything)");
-    } catch (e) { log("Init FAILED: " + e.message, true); }
+        log("✅ Ready! v" + VERSION + " — Fix: icon migration + flux model + gossip names");
+    } catch (e) { log("Init FAILED: " + e.message, true); console.error("[InstaChar] Init failed:", e); }
 });
