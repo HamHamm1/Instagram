@@ -1,11 +1,11 @@
-/* InstaChar v0.14.0 — New features on v0.9 stable base */
+/* InstaChar v0.15.0 — New features on v0.9 stable base */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.14.0";
+const VERSION = "0.15.0";
 
 // ✅ Role detection mapping
 const ROLE_KEYWORDS = {
@@ -170,6 +170,15 @@ function getCharData() {
 // ---------- Utility ----------
 function uid(prefix) { return (prefix || "id") + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7); }
 
+// 🆕 mood badge พร้อมสี
+const MOOD_COLORS = { happy:"#ffc107",sad:"#90a4ae",flirty:"#ec407a",chill:"#4dd0e1",excited:"#ffa726",moody:"#ba68c8",proud:"#66bb6a",jealous:"#9575cd",lonely:"#7986cb",mischievous:"#ff8a65",thoughtful:"#b0bec5",tired:"#9e9e9e",hyped:"#ef5350",angry:"#f44336",soft:"#f48fb1" };
+function renderMoodBadge(mood) {
+    if (!mood) return "";
+    const c = MOOD_COLORS[mood] || "#a8a8a8";
+    return `<span style="background:${c}22;color:${c};padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700">${escapeHtml(mood)}</span>`;
+}
+
+
 function timeAgo(ts) {
     const diff = Math.floor((Date.now() - ts) / 1000);
     if (diff < 60) return diff + " วิ";
@@ -197,13 +206,46 @@ function sanitizeUsername(name) {
 
 // 🆕 5 Art Styles — เลือกได้ในหน้า Settings (⚙ มุมขวาบน)
 const ART_STYLES = {
-    "modern": { name: "🎨 Modern Anime", desc: "Makoto Shinkai vibe", prefix: "anime artwork, ", suffix: ", beautiful face, perfect anatomy, soft cinematic lighting, masterpiece", model: "flux" },
-    "ghibli": { name: "🌿 Ghibli",        desc: "Miyazaki watercolor", prefix: "studio ghibli anime, ", suffix: ", warm natural light, perfect anatomy, masterpiece", model: "flux" },
-    "shoujo": { name: "✨ Shoujo / BL",   desc: "BL pastel sparkly",   prefix: "shoujo manga anime, ", suffix: ", soft pastel, sparkles, beautiful face, perfect anatomy, masterpiece", model: "flux" },
-    "cyberpunk": { name: "🌃 Cyberpunk", desc: "neon tokyo",           prefix: "cyberpunk anime, ",   suffix: ", neon lights, rain, perfect anatomy, dramatic lighting, masterpiece", model: "flux" },
-    "manga": { name: "📖 Manga B&W",     desc: "ขาวดำ screentone",     prefix: "manga illustration, ", suffix: ", black and white, screentone, perfect anatomy, sharp lineart, masterpiece", model: "flux" },
+    "modern": {
+        name: "🎨 Modern Anime",
+        desc: "Makoto Shinkai vibe — cinematic",
+        prefix: "anime illustration, 1 person, ",
+        suffix: ", makoto shinkai art style, kyoto animation quality, extremely detailed face and eyes, perfect proportions, full body visible, soft volumetric lighting, vivid colors, 8k, masterpiece, best quality",
+        model: "flux",
+    },
+    "ghibli": {
+        name: "🌿 Ghibli",
+        desc: "Miyazaki watercolor อบอุ่น",
+        prefix: "studio ghibli anime style, 1 person, ",
+        suffix: ", hayao miyazaki, detailed watercolor painting, warm golden light, lush hand-drawn background, perfect anatomy, full body visible, painterly texture, 8k, masterpiece",
+        model: "flux",
+    },
+    "shoujo": {
+        name: "✨ Shoujo / BL",
+        desc: "BL pastel อ่อนหวาน",
+        prefix: "shoujo manga anime, 1 handsome person, ",
+        suffix: ", BL manhwa style, soft rose pastel palette, sparkling bokeh, extremely detailed glossy eyes, delicate lineart, perfect anatomy, full body visible, romantic atmosphere, 8k, masterpiece",
+        model: "flux",
+    },
+    "cyberpunk": {
+        name: "🌃 Cyberpunk",
+        desc: "neon tokyo เมืองดึก",
+        prefix: "cyberpunk anime, 1 person, ",
+        suffix: ", neon-lit tokyo alley at night, rain puddle reflections, vivid magenta cyan neon glow, detailed urban environment, perfect anatomy, full body visible, cinematic dramatic lighting, 8k, masterpiece",
+        model: "flux",
+    },
+    "manga": {
+        name: "📖 Manga B&W",
+        desc: "ขาวดำ screentone",
+        prefix: "manga illustration, 1 person, monochrome, ",
+        suffix: ", professional manga panel, high-contrast ink, detailed screentone shading, clean crisp lineart, perfect anatomy, full body visible, dynamic composition, 8k, masterpiece",
+        model: "flux",
+    },
 };
-const IMG_NEGATIVE = "deformed,mutated,extra limbs,missing limbs,missing arms,bad anatomy,ugly,blurry,watermark,text";
+
+// Negative prompt เข้ม — กัน anatomy พัง + กัน realistic
+const IMG_NEGATIVE = "deformed,mutated,extra limbs,missing limbs,missing arms,missing hands,fused fingers,bad anatomy,malformed,ugly face,cross-eyed,blurry,low quality,jpeg artifacts,watermark,text,signature,logo,realistic,photograph,3d render,cgi,extra heads,cloned face,asymmetric,out of frame,cropped";
+
 
 const imageCache = new Map();
 function makeImageUrl(prompt, seed) {
@@ -541,7 +583,7 @@ function buildCharContext(npc) {
 }
 
 // ---------- Post Generation ----------
-// 🆕 Token config — ทุก mode = 1 call = $5 ต่างกันแค่ content ที่อัด
+// 🆕 Token config — ทุก mode = 1 call เท่ากัน ต่างกันแค่ content ที่อัด
 function getTokenConfig() {
     const mode = (getGlobal().tokenMode) || "heavy";
     if (mode === "light")  return { multiMin:1, multiMax:2, gossip:false, comments:"3-5", caption:"3-5 sentences" };
@@ -578,7 +620,8 @@ ${roster}
 
 1️⃣ Pick ${cfg.multiMin}-${cfg.multiMax} NPCs most relevant to scene. For each:
    - Thai caption: ${cfg.caption}, exact pronouns/slang, reference scene
-   - 6-10 hashtags, English image prompt (15-20 words, anime style, NO real people)
+   - 6-10 hashtags
+   - English image prompt (25-35 words): specify [subject + pose + expression] + [location/setting] + [lighting/time of day] + [mood/atmosphere]. anime illustration style. NO real people.
    - Mood: happy/sad/flirty/chill/excited/moody/proud/jealous/lonely/mischievous/thoughtful/tired/hyped/angry/soft
 2️⃣ ${cfg.comments} comments per post (mix: other NPCs in-character + anonymous followers, Thai, no "${userName}")${gossipRule}
 
@@ -1176,7 +1219,7 @@ function openInAppSettings() {
     ];
     const modeCards = modes.map(m =>
         `<div class="mode-card" data-mode="${m.k}" style="background:${(g.tokenMode||"heavy")===m.k?"rgba(220,39,67,0.1)":"#121212"};border:2px solid ${(g.tokenMode||"heavy")===m.k?"#dc2743":"#262626"};border-radius:10px;padding:10px;cursor:pointer;margin-bottom:6px">
-            <div style="font-size:13px;font-weight:700">${m.l} <span style="float:right;color:#0095f6;font-size:11px">$5/call</span></div>
+            <div style="font-size:13px;font-weight:700">${m.l} <span style="float:right;color:#0095f6;font-size:11px">1 โควต้า</span></div>
             <div style="font-size:11px;color:#a8a8a8">${m.h}</div>
         </div>`
     ).join("");
@@ -1185,7 +1228,7 @@ function openInAppSettings() {
         <h3 style="margin:0 0 14px">⚙️ ตั้งค่า InstaChar</h3>
         <div style="font-size:13px;font-weight:700;margin-bottom:8px">🎨 Art Style</div>
         <div id="style-picker">${styleCards}</div>
-        <div style="font-size:13px;font-weight:700;margin:14px 0 8px">💰 Content per Call ($5 ทุก mode)</div>
+        <div style="font-size:13px;font-weight:700;margin:14px 0 8px">💰 Content per โควต้า (ทุก mode ใช้ 1 โควต้าเท่ากัน)</div>
         <div id="mode-picker">${modeCards}</div>
         <div style="background:#0d0d0d;border-radius:10px;padding:12px;margin:14px 0">
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
@@ -1335,7 +1378,7 @@ function renderPostCard(post) {
             <div class="post-user" data-npc="${post.authorId || ''}">
                 <img class="avatar" src="${escapeHtml(post.authorAvatar)}" onerror="this.src='${defaultAvatar(post.author)}'"/>
                 <div class="post-user-info"><div class="username">${escapeHtml(post.authorUsername || post.author)}</div>
-                ${post.mood ? `<div class="post-mood">${escapeHtml(post.mood)}</div>` : ""}</div>
+                ${post.mood ? `<div class="post-mood">${renderMoodBadge(post.mood)}</div>` : ""}</div>
             </div>
             <div class="post-menu" data-post="${post.id}">⋯
                 <div class="post-menu-dropdown" data-dropdown="${post.id}">
@@ -1676,41 +1719,121 @@ function renderDMList() {
     const data = getCharData();
     if (!data) return;
     const view = shadowRoot.getElementById("view");
-    const npcsWithDms = data.npcs;
+    const sub = data._dmSubTab || "user";
+    const gossipKeys = Object.keys(data.npcDms || {}).filter(k => (data.npcDms[k].messages || []).length > 0);
+
     view.innerHTML = `<div class="dm-header"><div class="dm-title">ข้อความ</div></div>
+    <div style="display:flex;gap:4px;padding:0 14px 8px;border-bottom:1px solid #262626">
+        <button class="dm-tab ${sub==="user"?"active":""}" data-sub="user" style="flex:1;padding:7px 4px;background:transparent;color:${sub==="user"?"#f5f5f5":"#a8a8a8"};border:none;border-bottom:2px solid ${sub==="user"?"#0095f6":"transparent"};cursor:pointer;font-size:13px;font-weight:600">👤 ของฉัน</button>
+        <button class="dm-tab ${sub==="gossip"?"active":""}" data-sub="gossip" style="flex:1;padding:7px 4px;background:transparent;color:${sub==="gossip"?"#f5f5f5":"#a8a8a8"};border:none;border-bottom:2px solid ${sub==="gossip"?"#0095f6":"transparent"};cursor:pointer;font-size:13px;font-weight:600">👀 ลือ NPC${gossipKeys.length>0?` <span style="background:#ed4956;color:white;padding:0 5px;border-radius:8px;font-size:10px">${gossipKeys.length}</span>`:""}</button>
+    </div>
     <div class="dm-list">
-        ${npcsWithDms.length === 0 ? '<div class="empty-small">ยังไม่มีตัวละคร</div>' :
-            npcsWithDms.map(n => {
-                const thread = data.dms[n.id] || [];
-                const last = thread[thread.length - 1];
-                return `<div class="dm-item" data-npc="${n.id}">
-                    <img class="avatar" src="${escapeHtml(n.avatar)}" onerror="this.src='${defaultAvatar(n.name)}'"/>
-                    <div class="dm-info">
-                        <div class="dm-name">${escapeHtml(n.displayName)}</div>
-                        <div class="dm-preview">${last ? escapeHtml(last.text.slice(0, 50)) : "เริ่มคุย..."}</div>
+    ${sub === "user" ? (
+        data.npcs.length === 0 ? '<div class="empty-small">ยังไม่มีตัวละคร</div>' :
+        data.npcs.map(n => {
+            const thread = data.dms[n.id] || [];
+            const last = thread[thread.length - 1];
+            const mood = n.currentMood;
+            const moodColor = { happy:"#ffc107",sad:"#90a4ae",flirty:"#ec407a",chill:"#4dd0e1",excited:"#ffa726",moody:"#ba68c8",proud:"#66bb6a",jealous:"#9575cd",lonely:"#7986cb",mischievous:"#ff8a65",thoughtful:"#b0bec5",tired:"#9e9e9e",hyped:"#ef5350",angry:"#ef5350",soft:"#f48fb1" }[mood] || "#a8a8a8";
+            return `<div class="dm-item" data-npc="${n.id}">
+                <img class="avatar" src="${escapeHtml(n.avatar)}" onerror="this.src='${defaultAvatar(n.name)}'"/>
+                <div class="dm-info">
+                    <div class="dm-name">${escapeHtml(n.displayName)}${mood ? ` <span style="background:${moodColor}22;color:${moodColor};padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600">${escapeHtml(mood)}</span>` : ""}</div>
+                    <div class="dm-preview">${last ? escapeHtml(last.text.slice(0, 50)) : "เริ่มคุย..."}</div>
+                </div>
+                ${thread.length > 0 ? `<button class="dm-item-del" data-clear="${n.id}">🗑</button>` : ""}
+            </div>`;
+        }).join("")
+    ) : (
+        gossipKeys.length === 0
+            ? '<div class="empty-small" style="padding:30px 20px;text-align:center"><div style="font-size:32px;margin-bottom:8px">👀</div>ยังไม่มีนินทา<br/><span style="font-size:11px;color:#737373">NPCs จะ DM กันเองหลังโพสต์</span></div>'
+            : (gossipKeys.map(key => {
+                const thread = data.npcDms[key];
+                const a = findNpc(thread.participants[0]);
+                const b = findNpc(thread.participants[1]);
+                if (!a || !b) return "";
+                const last = thread.messages[thread.messages.length - 1];
+                const lastAuthor = last ? findNpc(last.npcId) : null;
+                return `<div class="dm-item" data-gossip="${key}">
+                    <div style="display:flex;align-items:center">
+                        <img class="avatar" src="${escapeHtml(a.avatar)}" onerror="this.src='${defaultAvatar(a.name)}'"/>
+                        <img class="avatar" src="${escapeHtml(b.avatar)}" onerror="this.src='${defaultAvatar(b.name)}'" style="margin-left:-10px;border:2px solid #000"/>
                     </div>
-                    ${thread.length > 0 ? `<button class="dm-item-del" data-clear="${n.id}" title="ลบประวัติแชท">🗑</button>` : ""}
+                    <div class="dm-info">
+                        <div class="dm-name">${escapeHtml(a.displayName)} ↔ ${escapeHtml(b.displayName)}</div>
+                        <div class="dm-preview">${lastAuthor?`<b>${escapeHtml(lastAuthor.displayName||lastAuthor.name)}:</b> `:""}${last?escapeHtml(last.text.slice(0,50)):""}</div>
+                    </div>
+                    <button class="dm-item-del" data-clear-gossip="${key}">🗑</button>
                 </div>`;
-            }).join("")}
+            }).join("") + `<div style="padding:6px 14px;text-align:right"><button id="clear-all-gossip" style="background:transparent;border:1px solid #ed4956;color:#ed4956;padding:3px 10px;border-radius:6px;font-size:11px;cursor:pointer">🧹 ล้างทั้งหมด</button></div>`)
+    )}
     </div>`;
-    shadowRoot.querySelectorAll(".dm-item").forEach(el => {
-        el.addEventListener("click", (e) => {
-            if (e.target.classList.contains("dm-item-del")) return;
-            openDM(el.dataset.npc);
-        });
-    });
-    shadowRoot.querySelectorAll(".dm-item-del").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const id = btn.dataset.clear;
-            if (!confirm("ลบประวัติแชทนี้?")) return;
-            delete data.dms[id];
-            save();
-            renderDMList();
-            toast("ลบแชทแล้ว ✓");
-        });
+
+    shadowRoot.querySelectorAll(".dm-tab").forEach(btn => btn.addEventListener("click", () => {
+        data._dmSubTab = btn.dataset.sub; renderDMList();
+    }));
+    shadowRoot.querySelectorAll(".dm-item[data-npc]").forEach(el => el.addEventListener("click", e => {
+        if (e.target.classList.contains("dm-item-del")) return; openDM(el.dataset.npc);
+    }));
+    shadowRoot.querySelectorAll("[data-clear]").forEach(btn => btn.addEventListener("click", e => {
+        e.stopPropagation();
+        if (!confirm("ลบแชทนี้?")) return;
+        delete data.dms[btn.dataset.clear]; save(); renderDMList(); toast("ลบแล้ว ✓");
+    }));
+    shadowRoot.querySelectorAll(".dm-item[data-gossip]").forEach(el => el.addEventListener("click", e => {
+        if (e.target.classList.contains("dm-item-del")) return; openGossipPeek(el.dataset.gossip);
+    }));
+    shadowRoot.querySelectorAll("[data-clear-gossip]").forEach(btn => btn.addEventListener("click", e => {
+        e.stopPropagation();
+        if (!confirm("ลบบทสนทนานี้?")) return;
+        delete data.npcDms[btn.dataset.clearGossip]; save(); renderDMList();
+    }));
+    const clearAll = shadowRoot.getElementById("clear-all-gossip");
+    if (clearAll) clearAll.addEventListener("click", () => {
+        if (!confirm("ล้าง gossip ทั้งหมด?")) return;
+        data.npcDms = {}; save(); renderDMList(); toast("ล้างแล้ว ✓");
     });
 }
+
+// 🆕 Gossip peek view
+function openGossipPeek(pairKey) {
+    if (!shadowRoot) return;
+    const data = getCharData();
+    if (!data) return;
+    const thread = data.npcDms && data.npcDms[pairKey];
+    if (!thread) return;
+    const view = shadowRoot.getElementById("view");
+    const a = findNpc(thread.participants[0]);
+    const b = findNpc(thread.participants[1]);
+    if (!a || !b) return renderDMList();
+    view.innerHTML = `
+        <div class="dm-chat-head">
+            <button class="back-btn" id="back">←</button>
+            <div style="display:flex;align-items:center;gap:4px">
+                <img class="avatar" src="${escapeHtml(a.avatar)}" onerror="this.src='${defaultAvatar(a.name)}'"/>
+                <img class="avatar" src="${escapeHtml(b.avatar)}" onerror="this.src='${defaultAvatar(b.name)}'"/>
+            </div>
+            <div class="dm-chat-name" style="flex:1">${escapeHtml(a.displayName)} ↔ ${escapeHtml(b.displayName)}</div>
+        </div>
+        <div style="padding:8px 14px;background:rgba(237,73,86,0.1);border-bottom:1px solid #262626;font-size:11px;color:#ff6b6b;text-align:center">
+            👀 คุณกำลังแอบดูแชทลับ — พวกเขาไม่รู้ว่าคุณเห็น
+        </div>
+        <div class="dm-thread" id="dm-thread">
+            ${thread.messages.map(m => {
+                const sp = findNpc(m.npcId);
+                const isA = m.npcId === a.id;
+                return `<div class="dm-msg ${isA?"char":"npc-other"}" style="background:${isA?"#262626":"#1c1c1e"}">
+                    <div style="font-size:10px;color:#737373;margin-bottom:2px;font-weight:600">${escapeHtml(sp ? (sp.displayName||sp.name) : (m.authorName||"?"))}</div>
+                    ${escapeHtml(m.text)}
+                </div>`;
+            }).join("")}
+        </div>`;
+    shadowRoot.getElementById("back").addEventListener("click", () => { data._dmSubTab = "gossip"; renderDMList(); });
+    const t = shadowRoot.getElementById("dm-thread");
+    if (t) t.scrollTop = t.scrollHeight;
+}
+
+
 
 function openDM(npcId) {
     if (!shadowRoot) return;
@@ -1820,7 +1943,7 @@ function renderMyProfile() {
             <button class="secondary-btn" id="add-npc" style="flex:1">+ เพิ่มตัวละคร</button>
             <button class="secondary-btn" id="scan-npcs" style="flex:1;background:linear-gradient(45deg,#1a1a2e,#16213e);border:1px solid #0095f6;color:#0095f6">🔍 สแกน Lorebook</button>
             <button class="secondary-btn" id="scan-chat-npcs" style="flex:1 1 100%;background:linear-gradient(45deg,#1a2e1a,#162e13);border:1px solid #4caf50;color:#4caf50">💬 สแกนจากแชท</button>
-            <button id="smart-post-now" style="flex:1 1 100%;margin-top:6px;padding:10px;background:linear-gradient(45deg,#f09433,#dc2743,#bc1888);color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer">🎭 ให้ NPC โพสต์เลย! ($5)</button>
+            <button id="smart-post-now" style="flex:1 1 100%;margin-top:6px;padding:10px;background:linear-gradient(45deg,#f09433,#dc2743,#bc1888);color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer">🎭 ให้ NPC โพสต์ (1 โควต้า)</button>
         </div>
         <div id="scan-status" style="font-size:12px;color:#a8a8a8;text-align:center;padding:4px 0;min-height:18px"></div>
 
@@ -1912,7 +2035,7 @@ function renderMyProfile() {
             smartBtn.textContent = "⏳ กำลังโหลด...";
             await smartPostNow(msg => { if (statusEl) statusEl.textContent = msg; });
             smartBtn.disabled = false;
-            smartBtn.textContent = "🎭 ให้ NPC โพสต์เลย! ($5)";
+            smartBtn.textContent = "🎭 ให้ NPC โพสต์ (1 โควต้า)";
             renderMyProfile();
             setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 3000);
         });
