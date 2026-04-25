@@ -1,11 +1,11 @@
-/* InstaChar v0.11.0 — 5 Art Styles + Token Modes + In-app Settings */
+/* InstaChar v0.12.0 — One Call = $5: Mega Batch (posts+comments+gossip in 1 call) */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.11.0";
+const VERSION = "0.12.0";
 
 // ✅ Role detection mapping
 const ROLE_KEYWORDS = {
@@ -22,38 +22,38 @@ const ROLE_KEYWORDS = {
 
 const DEFAULT_GLOBAL = {
     iconVisible: true,
-    autoPost: true,
+    autoPost: false,           // 🆕 v0.12: default OFF — let user opt-in (manual mode = $0 unless asked)
     ambientEnabled: false,
-    postChance: 0.45,
+    postChance: 0.30,          // 🆕 v0.12: lower default (was 0.45)
     iconPos: null,
     currentTab: "feed",
     characters: {},
-    // 🆕 v0.10 features
     multiNpc: true,
     npcGossip: true,
     longCaptions: true,
-    // 🆕 v0.11 art + token controls
-    artStyle: "modern",       // 'modern' | 'ghibli' | 'shoujo' | 'cyberpunk' | 'manga'
-    tokenMode: "medium",      // 'light' | 'medium' | 'heavy'
+    artStyle: "modern",
+    tokenMode: "heavy",        // 🆕 v0.12: default to heavy — 1 call gives MAX content (best value)
+    cooldownEnabled: true,     // 🆕 v0.12: prevent rapid-fire $5 calls
+    cooldownSeconds: 30,
+    llmStats: { totalCalls: 0, sessionCalls: 0, sessionStart: 0, lastTag: "", lastCallAt: 0 },
 };
 
-// 🆕 Token Mode presets — controls how aggressive the LLM calls are
+// 🆕 v0.12 — All modes use 1 LLM call. Modes only differ in HOW MUCH content packed into that call.
+// Each call costs $5 flat-rate, so HEAVY mode = best value (most content for same $5).
 function getTokenConfig() {
     const g = getGlobal();
-    const mode = g.tokenMode || "medium";
+    const mode = g.tokenMode || "heavy";
     if (mode === "light") {
-        // 1 NPC posts, no cross-comments, no gossip → ~1 LLM call
-        return { useMulti: false, multiMin: 1, multiMax: 1, crossComments: false, gossipChance: 0,
-                 commentCount: "3-5", captionLen: "3-5 sentences", label: "เบา" };
+        return { useMulti: true, multiMin: 1, multiMax: 2, gossipChance: 0,
+                 commentCount: "3-5", captionLen: "3-5 sentences", label: "เบา ($5/call)" };
     }
-    if (mode === "heavy") {
-        // 3-4 NPCs + cross-comments + 70% gossip → ~3 LLM calls per AI message
-        return { useMulti: true, multiMin: 3, multiMax: 4, crossComments: true, gossipChance: 0.7,
-                 commentCount: "6-10", captionLen: "5-9 sentences", label: "หนัก" };
+    if (mode === "medium") {
+        return { useMulti: true, multiMin: 2, multiMax: 3, gossipChance: 0.4,
+                 commentCount: "5-7", captionLen: "4-6 sentences", label: "กลาง ($5/call)" };
     }
-    // medium (default) — balanced
-    return { useMulti: true, multiMin: 2, multiMax: 3, crossComments: true, gossipChance: 0.3,
-             commentCount: "5-7", captionLen: "4-7 sentences", label: "กลาง" };
+    // heavy (default) — pack the response with as much content as possible per $5
+    return { useMulti: true, multiMin: 3, multiMax: 4, gossipChance: 1.0,
+             commentCount: "6-9", captionLen: "5-8 sentences", label: "หนัก ($5/call — คุ้มสุด!)" };
 }
 
 function newCharData() {
@@ -606,6 +606,7 @@ async function generatePostFor(npc, sceneContext) {
     if (!data || !npc) return null;
     const charCtx = buildCharContext(npc);
     const sceneText = sceneContext ? sceneContext.slice(0, 1200) : "(random slice-of-life moment, write something natural for this character's daily life)";
+    const cfg = getTokenConfig();
 
     const otherNpcs = data.npcs.filter(n => n.id !== npc.id);
     const taggableNpcs = otherNpcs.map(n => `@${n.username} (${n.name}${n.role ? ", " + n.role : ""})`).join(", ");
@@ -613,62 +614,48 @@ async function generatePostFor(npc, sceneContext) {
         `- ${p.author} โพสต์ "${(p.caption || "").slice(0, 100)}" (${timeAgo(p.timestamp)}ก่อน)`
     ).join("\n");
 
-    const prompt = `[Instagram Post — Deep Character Simulation]
+    // 🆕 ALWAYS bundle comments inline (= 1 call only, $5 saved)
+    const prompt = `[Instagram Post — Single Character + Inline Comments (1 LLM Call Only)]
 
 ${charCtx}
 
-📍 Scene/Event that just happened in the story:
+📍 Scene/Event:
 ${sceneText}
 
-📰 Recent IG posts in this world (so you don't repeat ideas):
+📰 Recent IG posts:
 ${recentPosts || "(no recent posts)"}
 
-👥 Other characters you can @tag in this post:
+👥 Other characters you can @tag:
 ${taggableNpcs || "(no other characters)"}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Task: Generate ONE rich Instagram post as "${npc.name}" reacting to this scene.
+Generate IN ONE RESPONSE:
 
-✍️ CAPTION REQUIREMENTS:
-- Thai language ONLY (no English mixing except casual loanwords)
-- Use character's EXACT pronouns from role context
-- 4-8 sentences (a real, personal IG caption — emotional, specific, in-character)
-- Reference the scene above SPECIFICALLY (don't be generic)
-- Include their feelings, thoughts, maybe a question
-- Natural Thai IG slang (เนี่ย, เลย, อะ, 5555, ปัด, ฮือ, etc.) if matches their style
-- Use 2-4 fitting emojis scattered naturally (not all at the end)
-- If you @tag someone (use their @username), it must make narrative sense
-- Optional: mention setting, time of day, or sensory details
+1️⃣ POST as "${npc.name}":
+   - Thai caption: ${cfg.captionLen}, EXACT pronouns/slang, reference scene specifically
+   - 6-10 hashtags (Thai/English mix)
+   - Image prompt: 15-25 English words, anime art scene
+   - Mood: happy/sad/flirty/chill/excited/moody/proud/jealous/lonely/mischievous/thoughtful/tired/hyped/angry/soft
+   - Tags: array of @usernames you tagged
 
-🏷️ HASHTAGS:
-- 6-10 hashtags in Thai or English mixed
-- Mix of: mood tags, scene tags, aesthetic tags, in-joke tags
-- Some niche/specific (not just #love #life)
-
-🖼️ IMAGE PROMPT (English):
-- Anime/manga art style scene that matches the caption
-- Specific composition: subject, action, environment, lighting, mood
-- 15-30 words, vivid and cinematic
-- NO real people, NO photographic terms
-
-🎭 MOOD: pick ONE: happy, sad, flirty, chill, excited, moody, proud, jealous, lonely, mischievous, thoughtful, tired, hyped, angry, soft
-
-🏷️ TAGS: list of @usernames you tagged in caption (or empty)
+2️⃣ COMMENTS on this post (${cfg.commentCount} total):
+   - Mix: 1-2 NPCs from "Other characters" list (use @username, in character) + ${otherNpcs.length > 0 ? "anonymous followers" : "anonymous followers only"}
+   - Thai, 3-15 words each, varied voices
+   - NEVER from "${getUserName()}" or "${npc.name}"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Respond ONLY with minified JSON (no markdown, no explanation):
-{"caption":"long thai caption with emojis and natural voice","imagePrompt":"detailed english anime scene description","hashtags":["#tag1","#tag2"],"mood":"one_word","tags":["@user1"]}`;
+Respond ONLY with minified JSON:
+{"caption":"thai","imagePrompt":"english","hashtags":["#a"],"mood":"chill","tags":["@u"],"comments":[{"username":"name","text":"thai","npcId":"id_or_null"}]}`;
     try {
         const systemPrompt = `You are an Instagram caption writer for Thai BL/slice-of-life roleplay.
-- You must channel "${npc.name}" PERFECTLY: their pronouns, slang, emotional patterns
-- Role: "${npc.role || "unknown"}" — adopt that speaking style 100%
-- Captions must be RICH and PERSONAL — readers should feel this character is real
-- Reference the EXACT scene given, don't write generic posts
-- Output VALID minified JSON only. No markdown fences. No commentary.`;
+- Channel "${npc.name}" PERFECTLY: pronouns, slang, emotional patterns
+- Role: "${npc.role || "unknown"}"
+- Output VALID minified JSON only.`;
         const response = await callLLM(prompt, systemPrompt);
         const d = parseJson(response);
         if (!d || !d.caption) { log("Post JSON invalid", true); return null; }
         const likes = Math.max(8, Math.floor((npc.followers || 1000) * (0.3 + Math.random() * 1.6) / 10));
+        const userName = getUserName();
         const post = {
             id: uid("p"),
             authorId: npc.id,
@@ -684,19 +671,23 @@ Respond ONLY with minified JSON (no markdown, no explanation):
             timestamp: Date.now(),
             likes: likes,
             userLiked: false,
-            comments: [],
+            comments: Array.isArray(d.comments) ? d.comments.slice(0, 10).map(c => ({
+                username: (c.username || "").replace(/^@/, "") || "user_" + Math.floor(Math.random() * 999),
+                text: c.text || "",
+                npcId: c.npcId || null,
+                timestamp: Date.now(),
+            })).filter(c => c.text && c.username !== userName) : [],
             userComments: [],
         };
-        post.comments = await generateComments(npc, post, sceneText);
         data.posts.push(post);
         data.unreadCount++;
-        // 🎭 update mood timeline
         npc.currentMood = d.mood || npc.currentMood;
         npc.lastPostAt = Date.now();
+        bumpLlmCallCounter("single-post");
         save();
         flashIcon();
         if (isPanelOpen() && getGlobal().currentTab === "feed") renderCurrentTab();
-        log(`${npc.name} posted ✓ (mood: ${d.mood}, ${(d.caption || "").length}c)`);
+        log(`💰 1 call = ${npc.name} post + ${post.comments.length} comments`);
         return post;
     } catch (e) {
         log("Post gen failed: " + e.message, true);
@@ -707,12 +698,17 @@ Respond ONLY with minified JSON (no markdown, no explanation):
 // 🆕 Multi-NPC Smart Batch Post Generation
 // One LLM call → posts for 2-4 different characters reacting to the same scene
 // Maximizes token usage per API call & makes feed feel alive with multiple voices
-async function generateMultiNpcPosts(sceneContext, options) {
+// 🆕 v0.12 MEGA BATCH — รวม posts + cross-comments + gossip ใน 1 LLM call เดียว
+// 1 call = $5 ดังนั้น "อัด" content ให้เยอะที่สุดต่อ call
+async function generateMegaBatch(sceneContext, options) {
     options = options || {};
     const data = getCharData();
-    if (!data || data.npcs.length === 0) return [];
-    const minPosts = options.min || 2;
-    const maxPosts = options.max || 4;
+    if (!data || data.npcs.length === 0) return { posts: [], gossip: null };
+
+    const cfg = getTokenConfig();
+    const minPosts = options.min || cfg.multiMin;
+    const maxPosts = options.max || cfg.multiMax;
+    const includeGossip = options.gossip !== false && cfg.gossipChance > 0 && data.npcs.length >= 2;
 
     const card = getCharacterCard();
     const sceneText = sceneContext ? sceneContext.slice(0, 1500) : "(general slice-of-life)";
@@ -725,7 +721,20 @@ async function generateMultiNpcPosts(sceneContext, options) {
         return `id=${n.id}|name=${n.name}|user=${n.username}${role ? "|" + role : ""}\n  └ ${desc}`;
     }).join("\n");
 
-    const prompt = `[Multi-Character Instagram Reaction — Smart Selection]
+    const userName = getUserName();
+    const gossipBlock = includeGossip ? `
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3️⃣ NPC↔NPC PRIVATE GOSSIP DM (BONUS — also in same response!)
+   Pick 2 characters from roster who would secretly DM each other about this scene.
+   Generate 5-8 messages alternating between them.
+   Each message: Thai, short (3-15 words), in character, gossip/secrets/banter feel.
+   They might gossip about ${userName} or ${card ? card.name : "the protagonist"}.
+   Make it FEEL like real private gossip.` : "";
+
+    const gossipField = includeGossip ? `,"gossip":{"npcIdA":"id_xxx","npcIdB":"id_yyy","messages":[{"from":"A","text":"thai"}]}` : "";
+
+    const prompt = `[MEGA BATCH — Maximum content per LLM call]
 
 📖 Story scene that just happened:
 ${sceneText}
@@ -737,35 +746,40 @@ ${recentChat.slice(-1500)}
 ${roster}
 
 Main protagonist: ${card ? card.name : "?"}
-User/player: ${getUserName()}
+User/player: ${userName}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TASK: Pick ${minPosts}-${maxPosts} characters who would MOST LIKELY post about this scene RIGHT NOW. Skip characters not relevant. Each character writes their OWN caption in their own voice.
+🎯 GOAL: Generate as much rich content as possible in this ONE response.
 
-For each picked character:
-- 4-7 sentence Thai caption with their EXACT pronouns/slang from their description
-- 5-10 hashtags
-- Anime-style English image prompt (15-25 words, specific scene/composition)
-- Mood tag: happy/sad/flirty/chill/excited/moody/proud/jealous/lonely/mischievous/thoughtful/tired/hyped/angry/soft
-- Optional @tags of other characters (must match a real username from roster)
+1️⃣ INSTAGRAM POSTS — Pick ${minPosts}-${maxPosts} characters MOST relevant to this scene.
+   For each picked character, generate:
+   - Thai caption: ${cfg.captionLen}, EXACT pronouns/slang, reference scene specifically, 2-4 emojis
+   - Hashtags: 6-10 (mixed Thai/English)
+   - Image prompt: 15-25 English words, anime art scene composition (NO real people)
+   - Mood: pick ONE: happy/sad/flirty/chill/excited/moody/proud/jealous/lonely/mischievous/thoughtful/tired/hyped/angry/soft
+   - Tags: array of @usernames they tagged (must be from roster)
 
-Different characters should:
-- Have DIFFERENT angles on the same scene
-- Use their OWN voice (not generic)
-- Sometimes reference each other (cross-tagging adds drama!)
+2️⃣ COMMENTS for each post — generate ${cfg.commentCount} comments per post:
+   - Mix: NPCs from roster (use @username, react IN CHARACTER) + anonymous followers (made-up handles)
+   - Each comment: Thai, 3-15 words, natural IG style
+   - Variety: friends roast, crushes flirt, family nag, strangers fan
+   - NEVER from "${userName}" (the user)${gossipBlock}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Respond ONLY with minified JSON array (no markdown):
-[{"npcId":"id_xxx","caption":"long thai","imagePrompt":"english anime scene","hashtags":["#a"],"mood":"chill","tags":["@user"]}]`;
+Respond ONLY with minified JSON (no markdown):
+{"posts":[{"npcId":"id","caption":"thai","imagePrompt":"english","hashtags":["#a"],"mood":"chill","tags":["@u"],"comments":[{"username":"name","text":"thai","npcId":"id_or_null"}]}]${gossipField}}`;
 
     try {
-        const systemPrompt = `You are a multi-character Instagram simulator. Each post must capture that character's distinct voice — different personalities = different captions, slang, energy. Output valid JSON array only.`;
+        const systemPrompt = `You are a multi-character Instagram simulator. Pack as much in-character, scene-relevant content as possible into one response. Each character MUST sound distinct (different pronouns, slang, energy). Output valid minified JSON only.`;
         const response = await callLLM(prompt, systemPrompt);
-        const arr = parseJson(response);
-        if (!Array.isArray(arr) || arr.length === 0) return [];
+        const parsed = parseJson(response);
+        if (!parsed) { log("Mega batch JSON invalid", true); return { posts: [], gossip: null }; }
+
+        const postsArr = Array.isArray(parsed.posts) ? parsed.posts : (Array.isArray(parsed) ? parsed : []);
+        if (postsArr.length === 0) { log("Mega batch: no posts in response", true); return { posts: [], gossip: null }; }
 
         const created = [];
-        for (const item of arr.slice(0, maxPosts)) {
+        for (const item of postsArr.slice(0, maxPosts)) {
             const npc = findNpc(item.npcId) || candidates.find(n => n.name === item.name || n.username === item.username);
             if (!npc || !item.caption) continue;
             const likes = Math.max(8, Math.floor((npc.followers || 1000) * (0.3 + Math.random() * 1.6) / 10));
@@ -787,6 +801,15 @@ Respond ONLY with minified JSON array (no markdown):
                 comments: [],
                 userComments: [],
             };
+            // 🆕 Comments came in same response (no extra LLM call!)
+            if (Array.isArray(item.comments)) {
+                post.comments = item.comments.slice(0, 10).map(c => ({
+                    username: (c.username || "").replace(/^@/, "") || "user_" + Math.floor(Math.random() * 999),
+                    text: c.text || "",
+                    npcId: c.npcId || null,
+                    timestamp: Date.now(),
+                })).filter(c => c.text && c.username !== userName);
+            }
             data.posts.push(post);
             npc.currentMood = item.mood || npc.currentMood;
             npc.lastPostAt = Date.now();
@@ -794,22 +817,62 @@ Respond ONLY with minified JSON array (no markdown):
             created.push(post);
         }
 
-        if (created.length > 0 && options.crossComments !== false) {
-            await generateCrossComments(created, sceneText);
+        // 🆕 Gossip came in same response too (still 1 call total!)
+        let gossipResult = null;
+        if (includeGossip && parsed.gossip && Array.isArray(parsed.gossip.messages)) {
+            const npcA = findNpc(parsed.gossip.npcIdA) || data.npcs[0];
+            const npcB = findNpc(parsed.gossip.npcIdB) || data.npcs[1];
+            if (npcA && npcB && npcA.id !== npcB.id) {
+                if (!data.npcDms) data.npcDms = {};
+                const pairKey = [npcA.id, npcB.id].sort().join("__");
+                data.npcDms[pairKey] = data.npcDms[pairKey] || { participants: [npcA.id, npcB.id], messages: [] };
+                const baseTs = Date.now();
+                for (let i = 0; i < parsed.gossip.messages.length; i++) {
+                    const m = parsed.gossip.messages[i];
+                    if (!m.text) continue;
+                    const fromNpc = m.from === "A" ? npcA : npcB;
+                    data.npcDms[pairKey].messages.push({
+                        npcId: fromNpc.id,
+                        authorName: fromNpc.displayName,
+                        text: m.text,
+                        timestamp: baseTs + i * 1000,
+                    });
+                }
+                gossipResult = { participants: [npcA.id, npcB.id], count: parsed.gossip.messages.length };
+            }
         }
+
+        // 🆕 Track LLM cost
+        bumpLlmCallCounter("mega-batch");
         save();
         flashIcon();
         if (isPanelOpen() && getGlobal().currentTab === "feed") renderCurrentTab();
-        log(`🎭 Multi-post: ${created.length} NPCs posted`);
-        return created;
+        log(`💰 1 call = ${created.length} posts + ${created.reduce((s, p) => s + (p.comments?.length || 0), 0)} comments${gossipResult ? ` + ${gossipResult.count}-msg gossip` : ""}`);
+        return { posts: created, gossip: gossipResult };
     } catch (e) {
-        log("Multi-post failed: " + e.message, true);
-        return [];
+        log("Mega batch failed: " + e.message, true);
+        return { posts: [], gossip: null };
     }
 }
 
-// 🆕 Cross-NPC comments — NPCs comment on each other's posts (one batch LLM call)
-async function generateCrossComments(posts, sceneContext) {
+// 💰 LLM call counter — track $5/call cost so user can see spending
+function bumpLlmCallCounter(tag) {
+    const g = getGlobal();
+    if (!g.llmStats) g.llmStats = { totalCalls: 0, sessionCalls: 0, sessionStart: Date.now(), lastTag: "" };
+    g.llmStats.totalCalls++;
+    g.llmStats.sessionCalls++;
+    g.llmStats.lastTag = tag || "";
+    g.llmStats.lastCallAt = Date.now();
+    save();
+}
+
+function resetSessionCounter() {
+    const g = getGlobal();
+    if (!g.llmStats) g.llmStats = { totalCalls: 0, sessionCalls: 0, sessionStart: Date.now(), lastTag: "" };
+    g.llmStats.sessionCalls = 0;
+    g.llmStats.sessionStart = Date.now();
+    save();
+}
     const data = getCharData();
     if (!data || posts.length === 0) return;
     const userName = getUserName();
@@ -871,55 +934,9 @@ Respond ONLY with minified JSON:
     } catch (e) { log("crossComments: " + e.message, true); }
 }
 
-async function generateComments(npc, post, sceneContext) {
-    const userName = getUserName();
-    const data = getCharData();
-    const otherNpcs = data.npcs.filter(n => n.id !== npc.id);
-    const npcRoster = otherNpcs.map(n => `@${n.username} (${n.name}${n.role ? ", " + n.role : ""})`).join(", ");
+// ⚠️ generateComments() removed in v0.12 — comments now bundled in same call as the post (saves $5 per call)
 
-    const prompt = `[Instagram Comments — Rich Multi-Voice]
 
-📸 Post by @${npc.username} (${npc.name}, ${npc.role || "?"}, mood: ${post.mood}):
-"${post.caption}"
-Hashtags: ${(post.hashtags || []).join(" ")}
-
-Scene context: ${sceneContext ? sceneContext.slice(0, 500) : "(none)"}
-
-Other characters in this story (use their @username):
-${npcRoster || "(none)"}
-
-User's name: ${userName} (NEVER use this as commenter)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Generate 5-8 Thai IG comments. Mix carefully:
-- 2-3 from other NPCs in roster (use their @username, react IN CHARACTER to author + post content)
-- 2-4 anonymous followers (random handles like ploy_xx, mookkkk, _bambam, etc.)
-- 1-2 reply chains (one comment replies to another with "@user")
-
-Style by relationship:
-- Friends → roast, banter, inside jokes (กู/มึง slang if they talk like that)
-- Crush/lover → flirty subtle, blushing emojis, careful wording
-- Family elder → caring/scolding ("กินข้าวยัง?" "อย่ากลับดึก")
-- Younger sibling → annoying/cute energy
-- Random fans → 🥺❤️‍🔥 fire emojis, "หล่อมาก" "จัดไป"
-
-Variety: short (2 words) to medium (15 words). Some all caps for hype. Some emoji-heavy. Some pure text.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Respond ONLY with minified JSON array:
-[{"username":"name","text":"thai comment","npcId":"id_if_from_roster"}]`;
-    try {
-        const response = await callLLM(prompt, "Generate Thai IG comments. JSON array only. Each comment must feel like a different person wrote it.");
-        const arr = parseJson(response);
-        if (!Array.isArray(arr)) return [];
-        return arr.slice(0, 10).map(c => ({
-            username: (c.username || "").replace(/^@/, "") || "user_" + Math.floor(Math.random() * 999),
-            text: c.text || "",
-            npcId: c.npcId || null,
-            timestamp: Date.now(),
-        })).filter(c => c.text);
-    } catch (e) { return []; }
-}
 
 async function generateReactionToUser(npc, userPost) {
     const charCtx = buildCharContext(npc);
@@ -1442,13 +1459,13 @@ function showModal(html) {
 }
 function closeModal() { if (shadowRoot) shadowRoot.getElementById("modal-root").innerHTML = ""; }
 
-// 🆕 In-app Settings panel — opens from gear icon in topbar
+// 🆕 In-app Settings panel — opens from gear icon in topbar (v0.12 — cost-aware)
 function openInAppSettings() {
     if (!shadowRoot) return;
     const g = getGlobal();
     const currentStyle = g.artStyle || "modern";
-    const currentTokenMode = g.tokenMode || "medium";
-    const cfg = getTokenConfig();
+    const currentTokenMode = g.tokenMode || "heavy";
+    const stats = g.llmStats || { totalCalls: 0, sessionCalls: 0 };
 
     const styleCards = Object.entries(ART_STYLES).map(([key, s]) => {
         const isActive = key === currentStyle;
@@ -1463,71 +1480,98 @@ function openInAppSettings() {
     }).join("");
 
     const tokenModes = [
-        { key: "light", label: "🌱 เบา", hint: "1 NPC โพสต์ • ~1 LLM call/message", calls: "ประหยัด token" },
-        { key: "medium", label: "⚡ กลาง", hint: "2-3 NPCs + comments • ~2 LLM calls/message", calls: "สมดุล (แนะนำ)" },
-        { key: "heavy", label: "🔥 หนัก", hint: "3-4 NPCs + comments + gossip • ~3 LLM calls/message", calls: "เนื้อหาเยอะสุด" },
+        { key: "light", label: "🌱 เบา", hint: "1-2 NPCs โพสต์ + 3-5 comments", note: "เนื้อหาน้อย แต่ยังเป็น $5 เท่ากัน" },
+        { key: "medium", label: "⚡ กลาง", hint: "2-3 NPCs + 5-7 comments + นินทา 40%", note: "สมดุล" },
+        { key: "heavy", label: "🔥 หนัก (คุ้มสุด!)", hint: "3-4 NPCs + 6-9 comments + นินทาเสมอ", note: "อัด content เต็ม $5 ที่จ่าย" },
     ];
     const tokenCards = tokenModes.map(tm => {
         const isActive = tm.key === currentTokenMode;
         return `<div class="token-card ${isActive ? "active" : ""}" data-token="${tm.key}">
-            <div class="token-label">${tm.label}</div>
+            <div class="token-label">${tm.label} <span style="float:right;color:#0095f6;font-size:11px">$5/call</span></div>
             <div class="token-hint">${tm.hint}</div>
-            <div class="token-calls">${tm.calls}</div>
+            <div class="token-calls">${tm.note}</div>
         </div>`;
     }).join("");
 
+    const sessionCost = (stats.sessionCalls || 0) * 5;
+    const totalCost = (stats.totalCalls || 0) * 5;
+
     showModal(`
         <h3 style="margin:0 0 4px 0;font-size:20px">⚙️ ตั้งค่า InstaChar</h3>
-        <div style="font-size:11px;color:#737373;margin-bottom:16px">v${VERSION}</div>
+        <div style="font-size:11px;color:#737373;margin-bottom:12px">v${VERSION} · ทุก mode = 1 call = $5</div>
 
+        <!-- 💰 Cost Counter -->
+        <div style="background:linear-gradient(135deg,rgba(0,200,100,0.08),rgba(0,149,246,0.06));border:1px solid rgba(0,200,100,0.25);border-radius:10px;padding:12px;margin-bottom:14px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div>
+                    <div style="font-size:11px;color:#a8a8a8">รอบเซสชั่นนี้</div>
+                    <div style="font-size:22px;font-weight:800;color:#00c864">${stats.sessionCalls || 0} calls</div>
+                    <div style="font-size:13px;color:#0095f6;font-weight:700">≈ $${sessionCost}</div>
+                </div>
+                <div style="text-align:right">
+                    <div style="font-size:11px;color:#a8a8a8">ทั้งหมด</div>
+                    <div style="font-size:14px;color:#f5f5f5">${stats.totalCalls || 0} calls (≈ $${totalCost})</div>
+                    <button id="reset-counter" style="margin-top:6px;padding:4px 10px;background:#262626;color:#a8a8a8;border:none;border-radius:6px;cursor:pointer;font-size:11px">รีเซ็ต session</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📐 Art Style -->
         <div style="margin-bottom:18px">
-            <label style="display:block;font-size:13px;font-weight:700;color:#f5f5f5;margin-bottom:8px">🎨 ลายเส้น (Art Style)</label>
+            <label style="display:block;font-size:13px;font-weight:700;color:#f5f5f5;margin-bottom:8px">🎨 ลายเส้น (Art Style) — 5 แบบให้เลือก</label>
             <div class="art-grid">${styleCards}</div>
         </div>
 
+        <!-- 💰 Token Mode -->
         <div style="margin-bottom:18px">
-            <label style="display:block;font-size:13px;font-weight:700;color:#f5f5f5;margin-bottom:4px">⚡ Token Mode (ระดับการใช้ token)</label>
-            <div style="font-size:11px;color:#a8a8a8;margin-bottom:8px">เลือกระดับความเข้มข้นของเนื้อหา/รอบ</div>
+            <label style="display:block;font-size:13px;font-weight:700;color:#f5f5f5;margin-bottom:4px">💰 Content per Call</label>
+            <div style="font-size:11px;color:#a8a8a8;margin-bottom:8px">1 call = $5 ทุกระดับ — เลือกให้ "เนื้อหาเยอะที่สุด" จะคุ้มสุด</div>
             <div class="token-grid">${tokenCards}</div>
         </div>
 
+        <!-- ⚙ Toggles -->
         <div style="background:#0d0d0d;border-radius:10px;padding:12px;margin-bottom:14px">
             <div style="font-size:13px;font-weight:700;margin-bottom:10px">⚙️ Toggles</div>
+
             <div class="settings-toggle-row">
                 <div>
-                    <div style="font-size:13px">🎭 Multi-NPC Mode</div>
-                    <div style="font-size:11px;color:#737373">หลาย NPC โพสต์พร้อมกันใน 1 รอบ</div>
-                </div>
-                <label class="ic-switch"><input type="checkbox" id="setting-multinpc" ${g.multiNpc !== false ? "checked" : ""}/><span></span></label>
-            </div>
-            <div class="settings-toggle-row">
-                <div>
-                    <div style="font-size:13px">👀 NPC Gossip</div>
-                    <div style="font-size:11px;color:#737373">NPC แอบ DM นินทากันเอง (แอบดูได้!)</div>
-                </div>
-                <label class="ic-switch"><input type="checkbox" id="setting-gossip" ${g.npcGossip !== false ? "checked" : ""}/><span></span></label>
-            </div>
-            <div class="settings-toggle-row">
-                <div>
-                    <div style="font-size:13px">📸 Auto-post</div>
-                    <div style="font-size:11px;color:#737373">โพสต์เองเมื่อ AI ตอบ</div>
+                    <div style="font-size:13px">📸 Auto-post (ทุกครั้ง AI ตอบ)</div>
+                    <div style="font-size:11px;color:#737373">ปิด = $0 ตอน RP / กดเอง "Smart Post Now" เมื่อต้องการ</div>
                 </div>
                 <label class="ic-switch"><input type="checkbox" id="setting-autopost" ${g.autoPost ? "checked" : ""}/><span></span></label>
             </div>
+
+            <div class="settings-toggle-row">
+                <div>
+                    <div style="font-size:13px">🎭 Multi-NPC Mode</div>
+                    <div style="font-size:11px;color:#737373">หลาย NPC โพสต์ใน 1 call เดียว (แนะนำเปิด)</div>
+                </div>
+                <label class="ic-switch"><input type="checkbox" id="setting-multinpc" ${g.multiNpc !== false ? "checked" : ""}/><span></span></label>
+            </div>
+
+            <div class="settings-toggle-row">
+                <div>
+                    <div style="font-size:13px">⏰ Cooldown ${g.cooldownSeconds || 30} วิ</div>
+                    <div style="font-size:11px;color:#737373">กันยิง $5 ติดๆ — ห่างกันอย่างน้อย ${g.cooldownSeconds || 30} วินาที</div>
+                </div>
+                <label class="ic-switch"><input type="checkbox" id="setting-cooldown" ${g.cooldownEnabled !== false ? "checked" : ""}/><span></span></label>
+            </div>
+
             <div style="margin-top:10px">
-                <label style="font-size:13px">📊 ความถี่โพสต์: <span id="chance-val" style="color:#0095f6">${Math.round(g.postChance * 100)}%</span></label>
-                <input type="range" id="setting-chance" min="10" max="100" step="5" value="${Math.round(g.postChance * 100)}" style="width:100%;margin-top:6px"/>
+                <label style="font-size:13px">📊 ความถี่ Auto-post: <span id="chance-val" style="color:#0095f6">${Math.round(g.postChance * 100)}%</span></label>
+                <div style="font-size:11px;color:#737373;margin-bottom:4px">เปิด autopost ที่ 30% = AI ตอบ 10 ครั้ง → โพสต์ 3 ครั้ง = $15</div>
+                <input type="range" id="setting-chance" min="0" max="100" step="5" value="${Math.round(g.postChance * 100)}" style="width:100%;margin-top:6px"/>
             </div>
         </div>
 
+        <!-- 💡 Tips -->
         <div style="background:linear-gradient(135deg,rgba(0,149,246,0.1),rgba(220,39,67,0.06));border-radius:10px;padding:12px;margin-bottom:14px;border:1px solid rgba(0,149,246,0.2)">
-            <div style="font-size:12px;color:#0095f6;font-weight:700;margin-bottom:6px">💡 ฟีเจอร์ใหม่ใช้ได้ที่ไหน?</div>
+            <div style="font-size:12px;color:#0095f6;font-weight:700;margin-bottom:6px">💡 เคล็ดลับประหยัด $$:</div>
             <div style="font-size:11px;color:#a8a8a8;line-height:1.6">
-                • <b>Multi-NPC posts</b> — หน้า Feed (โพสต์หลายคนพร้อมกัน)<br/>
-                • <b>NPC Gossip</b> — แท็บ <b>ข้อความ</b> → "👀 ลือ NPC"<br/>
-                • <b>Smart Post Now</b> — แท็บ <b>Profile</b> ปุ่มสีชมพูล่างสุด<br/>
-                • <b>Mood badges</b> — เห็นใต้ชื่อในโพสต์/DM/Profile<br/>
-                • <b>@Tags</b> — แสดงใต้ caption ของโพสต์
+                • <b>คุ้มที่สุด:</b> Manual mode (ปิด autopost) + Heavy = กดทีไหร่ก็ได้ content เยอะ<br/>
+                • <b>RP เน้นคุย:</b> Auto-post 20-30% + Light/Medium<br/>
+                • <b>หลีกเลี่ยง:</b> Auto-post 100% + Heavy (จะยิง $5 ทุก message AI ตอบ)<br/>
+                • Cooldown เปิดไว้ ป้องกันกดส่ง 2 ที่ใน 5 วิ = เสีย $10
             </div>
         </div>
 
@@ -1551,7 +1595,6 @@ function openInAppSettings() {
         });
     });
 
-    // token mode picker
     shadowRoot.querySelectorAll(".token-card").forEach(card => {
         card.addEventListener("click", () => {
             shadowRoot.querySelectorAll(".token-card").forEach(c => c.classList.remove("active"));
@@ -1560,31 +1603,35 @@ function openInAppSettings() {
         });
     });
 
-    // chance slider live update
     const chanceSlider = shadowRoot.getElementById("setting-chance");
     const chanceVal = shadowRoot.getElementById("chance-val");
     chanceSlider.addEventListener("input", () => {
         chanceVal.textContent = chanceSlider.value + "%";
     });
 
+    shadowRoot.getElementById("reset-counter").addEventListener("click", () => {
+        resetSessionCounter();
+        toast("✓ รีเซ็ต counter รอบนี้แล้ว");
+        closeModal();
+        openInAppSettings();
+    });
+
     shadowRoot.getElementById("settings-close").addEventListener("click", closeModal);
     shadowRoot.getElementById("settings-save").addEventListener("click", () => {
         const g2 = getGlobal();
         g2.multiNpc = shadowRoot.getElementById("setting-multinpc").checked;
-        g2.npcGossip = shadowRoot.getElementById("setting-gossip").checked;
         g2.autoPost = shadowRoot.getElementById("setting-autopost").checked;
+        g2.cooldownEnabled = shadowRoot.getElementById("setting-cooldown").checked;
         g2.postChance = parseInt(chanceSlider.value) / 100;
-        // sync external SillyTavern panel
         try {
             $("#instachar-toggle-multinpc").prop("checked", g2.multiNpc);
-            $("#instachar-toggle-gossip").prop("checked", g2.npcGossip);
             $("#instachar-toggle-autopost").prop("checked", g2.autoPost);
             $("#instachar-chance-slider").val(Math.round(g2.postChance * 100));
             $("#instachar-chance-val").text(Math.round(g2.postChance * 100) + "%");
         } catch (e) {}
         save();
         closeModal();
-        toast("✓ บันทึกแล้ว — ลายเส้น: " + (ART_STYLES[g2.artStyle]?.name || "?"));
+        toast("✓ บันทึกแล้ว — " + (ART_STYLES[g2.artStyle]?.name || "?") + " · " + (getTokenConfig().label));
         renderCurrentTab();
     });
 }
@@ -2458,117 +2505,58 @@ async function onMessageReceived() {
         if (!msg || msg.is_user || msg.is_system) { log("Skipped: user/system message", false); return; }
         if (Math.random() > g.postChance) { log(`Random skip: ${Math.round(g.postChance * 100)}% chance`, false); return; }
 
-        const data = getCharData();
-        if (!data) return;
-        const sceneText = msg.mes || "";
-        const cfg = getTokenConfig();
-
-        // 🆕 Multi-NPC mode based on tokenMode preset
-        if (cfg.useMulti && g.multiNpc !== false && data.npcs.length >= 2) {
-            log(`🎭 Multi-NPC mode (${cfg.label}): ${data.npcs.length} NPCs available`);
-            const created = await generateMultiNpcPosts(sceneText, { min: cfg.multiMin, max: cfg.multiMax, crossComments: cfg.crossComments });
-            if (created.length > 0) {
-                if (g.npcGossip !== false && cfg.gossipChance > 0 && Math.random() < cfg.gossipChance && data.npcs.length >= 2) {
-                    await generateNpcToNpcDM(sceneText);
-                }
+        // 🆕 Cooldown — prevent rapid-fire $5 calls
+        if (g.cooldownEnabled !== false) {
+            const last = (g.llmStats && g.llmStats.lastCallAt) || 0;
+            const minGapMs = (g.cooldownSeconds || 30) * 1000;
+            if (Date.now() - last < minGapMs) {
+                log(`💸 Cooldown active — skipped ($${(g.llmStats && g.llmStats.sessionCalls * 5) || 0} so far)`, false);
                 return;
             }
         }
 
-        // Light mode / fallback — single NPC posts
+        const data = getCharData();
+        if (!data) return;
+        const sceneText = msg.mes || "";
+
+        // 🆕 ALL modes use generateMegaBatch (1 call) when ≥2 NPCs available
+        if (data.npcs.length >= 2 && g.multiNpc !== false) {
+            log(`💰 1-call mega batch starting...`);
+            const result = await generateMegaBatch(sceneText);
+            if (result.posts.length > 0) return;
+            // fallback to single-NPC if batch empty
+        }
+
+        // Single-NPC fallback (also 1 call with inline comments)
         let npc = msg.name ? findNpcByName(msg.name) : null;
         if (!npc) npc = ensureNpcFromCharacterCard();
         if (!npc) { log("Auto-post skipped: no NPC found", true); return; }
-        log(`🤖 Single-NPC post (${cfg.label}): ${npc.name}`);
         await generatePostFor(npc, sceneText);
     } catch (e) { log("message handler: " + e.message, true); }
 }
 
-// 🆕 Generate a private DM between 2 NPCs (gossip system) — user can peek in DM tab
-async function generateNpcToNpcDM(sceneContext) {
-    const data = getCharData();
-    if (!data || data.npcs.length < 2) return;
-
-    // Pick 2 random NPCs
-    const shuffled = [...data.npcs].sort(() => Math.random() - 0.5);
-    const npcA = shuffled[0];
-    const npcB = shuffled[1];
-
-    const card = getCharacterCard();
-    const userName = getUserName();
-
-    const prompt = `[Private DM Conversation Between Two NPCs]
-
-Character A: ${npcA.name} (${npcA.role || "?"})
-  ${(npcA.description || "").slice(0, 200)}
-
-Character B: ${npcB.name} (${npcB.role || "?"})
-  ${(npcB.description || "").slice(0, 200)}
-
-📖 Scene that just happened in the story:
-${sceneContext.slice(0, 1000)}
-
-Main protagonist: ${card ? card.name : "?"}
-User/player (${userName}) is NOT part of this conversation.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TASK: These two characters DM each other PRIVATELY about the scene above. 
-- They might gossip about ${userName} or ${card ? card.name : "the protagonist"}
-- They might share secrets, plot, complain, flirt, or roast someone
-- 4-8 messages back-and-forth, alternating speakers
-- Each message in Thai with their EXACT pronouns/slang
-- Short messages (3-15 words) like real IG DM
-- Make it FEEL like real gossip — natural reactions, "เห้ย ดูสิ" / "จริงดิ" / "ไม่นะ" / "มึงเอาจริง"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Respond ONLY with minified JSON:
-{"messages":[{"from":"A","text":"thai"},{"from":"B","text":"thai"}]}`;
-
-    try {
-        const response = await callLLM(prompt, "Generate a believable private DM between two characters. JSON only.");
-        const parsed = parseJson(response);
-        if (!parsed || !Array.isArray(parsed.messages)) return;
-
-        // Store in data.npcDms keyed by sorted pair
-        if (!data.npcDms) data.npcDms = {};
-        const pairKey = [npcA.id, npcB.id].sort().join("__");
-        data.npcDms[pairKey] = data.npcDms[pairKey] || { participants: [npcA.id, npcB.id], messages: [] };
-        const baseTs = Date.now();
-        for (let i = 0; i < parsed.messages.length; i++) {
-            const m = parsed.messages[i];
-            if (!m.text) continue;
-            const fromNpc = m.from === "A" ? npcA : npcB;
-            data.npcDms[pairKey].messages.push({
-                npcId: fromNpc.id,
-                authorName: fromNpc.displayName,
-                text: m.text,
-                timestamp: baseTs + i * 1000,
-            });
-        }
-        data.unreadCount++;
-        save();
-        flashIcon();
-        log(`💬 NPC↔NPC gossip: ${npcA.name} ↔ ${npcB.name} (${parsed.messages.length} msgs)`);
-    } catch (e) { log("npcToNpcDM: " + e.message, true); }
-}
-
-// 🆕 Smart "Generate posts now" — manual trigger that uses multi-NPC + recent chat as context
+// 🆕 Smart "Generate now" — manual trigger using mega batch
 async function smartPostNow(statusCb) {
     const data = getCharData();
     if (!data || data.npcs.length === 0) {
         toast("ไม่มี NPC — ลองสแกน Lorebook ก่อน");
         return [];
     }
-    if (statusCb) statusCb("🎭 กำลังให้ตัวละครโพสต์...");
+    if (statusCb) statusCb("💰 1 call กำลังทำงาน...");
     const recent = getRecentChat(15) || "(general slice-of-life moment in this story)";
-    const created = await generateMultiNpcPosts(recent, { min: 2, max: 4 });
-    if (statusCb) statusCb(created.length > 0 ? `✅ ${created.length} โพสต์ใหม่!` : "ไม่สามารถโพสต์ได้");
-    if (created.length > 0 && Math.random() < 0.5) {
-        await generateNpcToNpcDM(recent);
+    if (data.npcs.length >= 2) {
+        const result = await generateMegaBatch(recent);
+        if (statusCb) statusCb(result.posts.length > 0 ? `✅ ได้ ${result.posts.length} โพสต์${result.gossip ? " + นินทา" : ""}!` : "ไม่สามารถโพสต์ได้");
+        return result.posts;
     }
-    return created;
+    // Single NPC fallback
+    const npc = data.npcs[0];
+    const post = await generatePostFor(npc, recent);
+    if (statusCb) statusCb(post ? "✅ โพสต์แล้ว!" : "ไม่สามารถโพสต์ได้");
+    return post ? [post] : [];
 }
 
+// 🆕 Generate a private DM between 2 NPCs (gossip system) — user can peek in DM tab
 function onChatChanged() {
     try {
         const data = getCharData();
@@ -2719,6 +2707,6 @@ jQuery(async () => {
             } catch (e) { log("event bind: " + e.message, true); }
         }
         if (getGlobal().ambientEnabled) scheduleAmbient();
-        log("✅ Ready! v" + VERSION + " — 5 Art Styles + Token Modes + In-app Settings (gear icon)");
+        log("✅ Ready! v" + VERSION + " — One Call = $5 (Mega Batch packs everything)");
     } catch (e) { log("Init FAILED: " + e.message, true); }
 });
