@@ -1,14 +1,14 @@
 <div class="instachar-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b>📱 InstaChar v0.11 — Multi-NPC + 5 Art Styles + In-app Settings</b>
+            <b>📱 InstaChar v0.12 — One Call = $5 Mega Batch</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
 
-            <div class="instachar-row" style="background:linear-gradient(90deg,rgba(0,149,246,0.08),rgba(220,39,67,0.05));border-radius:8px;padding:12px;border:1px solid rgba(0,149,246,0.25);flex-direction:column;align-items:stretch">
-                <div style="font-size:13px;font-weight:700;color:#0095f6;margin-bottom:6px">⚙️ ตั้งค่าทั้งหมดอยู่ในแอป!</div>
-                <div class="hint" style="margin-bottom:8px">เปิดแอป InstaChar → กด ⚙ ที่มุมขวาบน<br/>(ลายเส้น 5 แบบ • Token Mode • Toggles • พรีวิว)</div>
+            <div class="instachar-row" style="background:linear-gradient(90deg,rgba(0,200,100,0.08),rgba(0,149,246,0.05));border-radius:8px;padding:12px;border:1px solid rgba(0,200,100,0.25);flex-direction:column;align-items:stretch">
+                <div style="font-size:13px;font-weight:700;color:#00c864;margin-bottom:6px">💰 Cost-aware: ทุก call = $5</div>
+                <div class="hint" style="margin-bottom:8px">v0.12 รวม posts + comments + นินทา ใน <b>1 call เดียว</b><br/>เลือก Heavy mode เพื่อให้ 1 call ได้ content เยอะที่สุด<br/>ตั้งค่าทั้งหมด + นับ $$ ในแอป — กด ⚙ มุมขวาบน</div>
                 <button id="instachar-open-btn" class="menu_button" type="button" style="margin-top:4px">📱 เปิดแอป InstaChar</button>
             </div>
 
@@ -25,11 +25,11 @@
 
             <div class="instachar-row">
                 <div>
-                    <label for="instachar-toggle-autopost">Auto-post ตามฉาก RP ✅</label>
-                    <div class="hint">ตัวละครโพสต์อัตโนมัติหลัง AI ตอบ</div>
+                    <label for="instachar-toggle-autopost">📸 Auto-post (ทุกครั้ง AI ตอบ)</label>
+                    <div class="hint"><b>ปิด default</b> = $0 ตอน RP / กดเอง "Smart Post Now" เมื่อต้องการ</div>
                 </div>
                 <label class="instachar-toggle">
-                    <input type="checkbox" id="instachar-toggle-autopost" checked />
+                    <input type="checkbox" id="instachar-toggle-autopost" />
                     <span class="instachar-toggle-slider"></span>
                 </label>
             </div>
@@ -37,7 +37,7 @@
             <div class="instachar-row">
                 <div>
                     <label for="instachar-toggle-multinpc">🎭 Multi-NPC Mode</label>
-                    <div class="hint">หลาย NPC โพสต์พร้อมกัน + comment กันเอง</div>
+                    <div class="hint">หลาย NPC ใน 1 call เดียว ($5 เดียว ได้ content เยอะ)</div>
                 </div>
                 <label class="instachar-toggle">
                     <input type="checkbox" id="instachar-toggle-multinpc" checked />
@@ -47,8 +47,8 @@
 
             <div class="instachar-row">
                 <div>
-                    <label for="instachar-toggle-gossip">👀 NPC Gossip</label>
-                    <div class="hint">NPC แอบ DM นินทากันเอง (แอบดูได้)</div>
+                    <label for="instachar-toggle-gossip">👀 NPC Gossip ในโพสต์</label>
+                    <div class="hint">นินทาระหว่าง NPC รวมใน mega call (ไม่เพิ่มค่าใช้จ่าย)</div>
                 </div>
                 <label class="instachar-toggle">
                     <input type="checkbox" id="instachar-toggle-gossip" checked />
@@ -58,21 +58,10 @@
 
             <div class="instachar-row">
                 <div>
-                    <label for="instachar-toggle-ambient">Ambient Activity</label>
-                    <div class="hint">NPC แวะ DM/comment user ทุก 5-15 นาที (เปลือง token)</div>
+                    <label for="instachar-chance-slider">ความถี่โพสต์: <span id="instachar-chance-val">30%</span></label>
+                    <div class="hint">เปิด autopost 30% = AI ตอบ 10 ครั้ง → โพสต์ 3 ครั้ง = $15</div>
                 </div>
-                <label class="instachar-toggle">
-                    <input type="checkbox" id="instachar-toggle-ambient" />
-                    <span class="instachar-toggle-slider"></span>
-                </label>
-            </div>
-
-            <div class="instachar-row">
-                <div>
-                    <label for="instachar-chance-slider">ความถี่โพสต์: <span id="instachar-chance-val">45%</span></label>
-                    <div class="hint">โอกาสโพสต์ต่อ 1 message ที่ AI ตอบ</div>
-                </div>
-                <input type="range" id="instachar-chance-slider" min="10" max="100" step="5" value="45" style="width:120px" />
+                <input type="range" id="instachar-chance-slider" min="0" max="100" step="5" value="30" style="width:120px" />
             </div>
 
             <div class="instachar-row">
@@ -109,7 +98,7 @@
             <div class="instachar-row">
                 <div>
                     <label>About</label>
-                    <div class="hint">InstaChar v0.11.0 · 5 Art Styles + Token Modes + In-app Settings</div>
+                    <div class="hint">v0.12.0 — Mega Batch + Cost Counter + Cooldown</div>
                 </div>
                 <a href="https://github.com/HamHamm1/Instagram" target="_blank" rel="noopener" class="menu_button" style="text-decoration: none;">GitHub ↗</a>
             </div>
