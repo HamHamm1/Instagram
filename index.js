@@ -1,11 +1,70 @@
-/* InstaChar v0.13.1 — BULLETPROOF body icon (works without Shadow DOM) */
+/* InstaChar v0.13.2 — TOP-LEVEL icon mount (runs immediately on script load) */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.13.1";
+const VERSION = "0.13.2";
+
+// 🆕 v0.13.2: TOP-LEVEL ICON — runs the moment this script loads
+// No jQuery, no Shadow DOM, no async — just put a button in the body NOW.
+// If this doesn't show, the JS module isn't loading at all.
+(function topLevelIconMount() {
+    const mount = () => {
+        try {
+            if (document.getElementById("instachar-body-icon")) return; // already there
+            const btn = document.createElement("button");
+            btn.id = "instachar-body-icon";
+            btn.title = "InstaChar";
+            btn.innerHTML = '📱<span id="instachar-body-badge" style="position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 6px;background:#ff2d55;color:white;font-size:11px;font-weight:700;border-radius:10px;display:none;align-items:center;justify-content:center;border:2px solid #000">0</span>';
+            btn.setAttribute("style", [
+                "position:fixed",
+                "right:16px",
+                "top:150px",
+                "width:58px",
+                "height:58px",
+                "border-radius:18px",
+                "background:linear-gradient(135deg,#667eea 0%,#764ba2 50%,#f093fb 100%)",
+                "border:none",
+                "box-shadow:0 15px 35px rgba(102,126,234,0.4),0 5px 15px rgba(118,75,162,0.3),0 0 0 2px rgba(255,255,255,0.15)",
+                "cursor:pointer",
+                "display:flex",
+                "align-items:center",
+                "justify-content:center",
+                "color:white",
+                "font-size:30px",
+                "z-index:2147483647",
+                "user-select:none",
+                "-webkit-tap-highlight-color:transparent",
+                "touch-action:none",
+                "padding:0",
+            ].join(";"));
+            // click handler — wired later in init when openPanelSafe is defined
+            btn.addEventListener("click", function () {
+                try {
+                    if (typeof openPanelSafe === "function") openPanelSafe();
+                    else alert("InstaChar กำลังโหลด... ลองอีกครั้งใน 3 วินาที");
+                } catch (e) { console.error("[InstaChar] click:", e); }
+            });
+            document.body.appendChild(btn);
+            console.log("[InstaChar] ✅ Top-level icon mounted at top:150 right:16");
+        } catch (e) {
+            console.error("[InstaChar] top-level mount failed:", e);
+        }
+    };
+    if (document.body) {
+        mount();
+    } else if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", mount);
+    } else {
+        // edge case: docElement exists but no body yet
+        setTimeout(mount, 100);
+    }
+    // also try again later, in case body wasn't ready
+    setTimeout(mount, 1000);
+    setTimeout(mount, 3000);
+})();
 
 // ✅ Role detection mapping
 const ROLE_KEYWORDS = {
