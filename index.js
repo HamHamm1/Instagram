@@ -1,11 +1,11 @@
-/* InstaChar v0.10.0 — Multi-NPC + Anime Style + Gossip Peek + DM Layout Fix */
+/* InstaChar v0.11.0 — 5 Art Styles + Token Modes + In-app Settings */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.10.0";
+const VERSION = "0.11.0";
 
 // ✅ Role detection mapping
 const ROLE_KEYWORDS = {
@@ -29,11 +29,32 @@ const DEFAULT_GLOBAL = {
     currentTab: "feed",
     characters: {},
     // 🆕 v0.10 features
-    multiNpc: true,        // multi-NPC batch posting (token-efficient, more content per call)
-    npcGossip: true,       // NPC-to-NPC private DMs that user can peek
-    longCaptions: true,    // rich 4-8 sentence captions
-    animeStyle: true,      // flux-anime model + anime style suffix
+    multiNpc: true,
+    npcGossip: true,
+    longCaptions: true,
+    // 🆕 v0.11 art + token controls
+    artStyle: "modern",       // 'modern' | 'ghibli' | 'shoujo' | 'cyberpunk' | 'manga'
+    tokenMode: "medium",      // 'light' | 'medium' | 'heavy'
 };
+
+// 🆕 Token Mode presets — controls how aggressive the LLM calls are
+function getTokenConfig() {
+    const g = getGlobal();
+    const mode = g.tokenMode || "medium";
+    if (mode === "light") {
+        // 1 NPC posts, no cross-comments, no gossip → ~1 LLM call
+        return { useMulti: false, multiMin: 1, multiMax: 1, crossComments: false, gossipChance: 0,
+                 commentCount: "3-5", captionLen: "3-5 sentences", label: "เบา" };
+    }
+    if (mode === "heavy") {
+        // 3-4 NPCs + cross-comments + 70% gossip → ~3 LLM calls per AI message
+        return { useMulti: true, multiMin: 3, multiMax: 4, crossComments: true, gossipChance: 0.7,
+                 commentCount: "6-10", captionLen: "5-9 sentences", label: "หนัก" };
+    }
+    // medium (default) — balanced
+    return { useMulti: true, multiMin: 2, multiMax: 3, crossComments: true, gossipChance: 0.3,
+             commentCount: "5-7", captionLen: "4-7 sentences", label: "กลาง" };
+}
 
 function newCharData() {
     return {
@@ -196,23 +217,70 @@ function sanitizeUsername(name) {
     return name.toLowerCase().replace(/[^a-z0-9_\u0e00-\u0e7f]/g, "").slice(0, 20) || "user";
 }
 
-// 🎨 Anime style image generator — uses flux-anime model + curated style suffix
-const ANIME_STYLE_SUFFIX = ", beautiful detailed anime art, makoto shinkai style, kyoto animation, ufotable, mappa studio, soft cinematic lighting, vibrant colors, masterpiece, best quality, ultra detailed, sharp lineart, official art, manga aesthetic";
-const ANIME_NEGATIVE = "realistic, photo, photograph, real person, 3d render, ugly, deformed, low quality, blurry, watermark, text";
+// 🎨 5 Art Styles — user can pick favorite in settings
+const ART_STYLES = {
+    "modern": {
+        name: "🎨 Modern Anime",
+        desc: "Makoto Shinkai / Kyoto Animation — สวยฟ้าๆ cinematic",
+        suffix: ", makoto shinkai style, kyoto animation, ufotable, mappa studio, soft cinematic lighting, vibrant colors, masterpiece, best quality, ultra detailed, sharp lineart, official art, beautiful detailed face",
+        model: "flux-anime",
+        previewPrompt: "beautiful anime boy portrait, soft sunset light, dreamy bokeh, blue sky background",
+    },
+    "ghibli": {
+        name: "🌿 Studio Ghibli",
+        desc: "Miyazaki / Ghibli — อบอุ่น watercolor วินเทจ",
+        suffix: ", studio ghibli style, hayao miyazaki, watercolor anime aesthetic, warm soft natural light, hand-painted background, nostalgic atmosphere, beautiful detailed scenery, masterpiece",
+        model: "flux-anime",
+        previewPrompt: "ghibli style boy in countryside, warm afternoon light, watercolor sky",
+    },
+    "shoujo": {
+        name: "✨ Shoujo / BL",
+        desc: "BL/Shoujo — pastel sparkly อ่อนหวาน",
+        suffix: ", shoujo manga style, BL aesthetic, soft pastel colors, sparkles, dreamy romantic atmosphere, beautiful detailed face, glossy reflective eyes, blush, flower petals, masterpiece",
+        model: "flux-anime",
+        previewPrompt: "shoujo style handsome boy, soft pink lighting, sparkles, gentle smile",
+    },
+    "cyberpunk": {
+        name: "🌃 Cyberpunk Neon",
+        desc: "Tokyo neon / cyberpunk — เสน่ห์เมืองดึก",
+        suffix: ", cyberpunk anime style, neon lights, tokyo night street, rain reflections, blade runner aesthetic, vibrant magenta cyan purple, detailed urban background, dramatic lighting, masterpiece",
+        model: "flux-anime",
+        previewPrompt: "cyberpunk anime boy, neon tokyo street at night, rain, glowing signs",
+    },
+    "manga": {
+        name: "📖 Manga B&W",
+        desc: "Manga ขาวดำ — screentone เส้นคม",
+        suffix: ", manga style, black and white, screentone halftone, ink illustration, detailed sharp lineart, dramatic shadows and contrast, manga panel aesthetic, masterpiece",
+        model: "flux-anime",
+        previewPrompt: "black and white manga boy portrait, dramatic light, screentone shading",
+    },
+};
+
+const ANIME_NEGATIVE = "realistic, photo, photograph, real person, 3d render, ugly, deformed, low quality, blurry, watermark, text, signature";
 
 const imageCache = new Map();
 function makeImageUrl(prompt, seed) {
-    const cacheKey = (prompt || "default") + "_" + seed;
+    const g = getGlobal();
+    const styleKey = g.artStyle || "modern";
+    const style = ART_STYLES[styleKey] || ART_STYLES.modern;
+    const cacheKey = styleKey + "_" + (prompt || "default") + "_" + seed;
     if (imageCache.has(cacheKey)) return imageCache.get(cacheKey);
     const cleanPrompt = (prompt || "aesthetic mood scene").replace(/(real|realistic|photo(graph)?|3d render)/gi, "");
-    const finalPrompt = cleanPrompt + ANIME_STYLE_SUFFIX;
+    const finalPrompt = cleanPrompt + style.suffix;
     const p = encodeURIComponent(finalPrompt);
     const neg = encodeURIComponent(ANIME_NEGATIVE);
-    // flux-anime is Pollinations' anime-specialized model (anime/manga/comics)
-    const url = "https://image.pollinations.ai/prompt/" + p + "?width=720&height=720&nologo=true&model=flux-anime&negative=" + neg + "&seed=" + (seed || Math.floor(Math.random() * 99999));
+    const url = "https://image.pollinations.ai/prompt/" + p + "?width=720&height=720&nologo=true&model=" + style.model + "&negative=" + neg + "&seed=" + (seed || Math.floor(Math.random() * 99999));
     if (imageCache.size > 80) { const firstKey = imageCache.keys().next().value; imageCache.delete(firstKey); }
     imageCache.set(cacheKey, url);
     return url;
+}
+
+// preview helper for settings UI (no caching, fresh seed)
+function makePreviewUrl(styleKey) {
+    const style = ART_STYLES[styleKey] || ART_STYLES.modern;
+    const p = encodeURIComponent(style.previewPrompt + style.suffix);
+    const neg = encodeURIComponent(ANIME_NEGATIVE);
+    return "https://image.pollinations.ai/prompt/" + p + "?width=400&height=400&nologo=true&model=" + style.model + "&negative=" + neg + "&seed=" + (42 + Object.keys(ART_STYLES).indexOf(styleKey));
 }
 
 function parseJson(text) {
@@ -726,7 +794,7 @@ Respond ONLY with minified JSON array (no markdown):
             created.push(post);
         }
 
-        if (created.length > 0) {
+        if (created.length > 0 && options.crossComments !== false) {
             await generateCrossComments(created, sceneText);
         }
         save();
@@ -1123,6 +1191,39 @@ const SHADOW_CSS = `
 .tag-chip { color: #0095f6; font-weight: 600; }
 .cross-comment-link { color: #0095f6; cursor: pointer; }
 
+/* 🆕 In-app Settings — Art Style picker */
+.art-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.art-card { position: relative; background: #121212; border: 2px solid #262626; border-radius: 10px; overflow: hidden; cursor: pointer; transition: all 0.2s; }
+.art-card:hover { border-color: #3a3a3a; transform: translateY(-1px); }
+.art-card.active { border-color: #0095f6; box-shadow: 0 0 0 2px rgba(0,149,246,0.3); }
+.art-preview { width: 100%; aspect-ratio: 1/1; background: #0a0a0a; overflow: hidden; }
+.art-preview img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity 0.4s; }
+.art-info { padding: 8px 10px; }
+.art-name { font-size: 12px; font-weight: 700; color: #f5f5f5; line-height: 1.3; }
+.art-desc { font-size: 10px; color: #a8a8a8; margin-top: 2px; line-height: 1.3; }
+.art-active-badge { position: absolute; top: 6px; right: 6px; background: #0095f6; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
+
+/* 🆕 Token Mode picker */
+.token-grid { display: flex; flex-direction: column; gap: 6px; }
+.token-card { background: #121212; border: 2px solid #262626; border-radius: 10px; padding: 10px 12px; cursor: pointer; transition: all 0.2s; }
+.token-card:hover { border-color: #3a3a3a; }
+.token-card.active { border-color: #dc2743; background: linear-gradient(90deg, rgba(220,39,67,0.08), rgba(188,24,136,0.05)); }
+.token-label { font-size: 14px; font-weight: 700; color: #f5f5f5; }
+.token-hint { font-size: 11px; color: #a8a8a8; margin-top: 3px; line-height: 1.4; }
+.token-calls { font-size: 10px; color: #0095f6; margin-top: 3px; font-weight: 600; }
+
+/* 🆕 In-app toggle switch */
+.settings-toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; gap: 10px; border-bottom: 1px solid #1a1a1a; }
+.settings-toggle-row:last-child { border-bottom: none; }
+.ic-switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+.ic-switch input { opacity: 0; width: 0; height: 0; }
+.ic-switch span { position: absolute; cursor: pointer; inset: 0; background: #3a3a3a; border-radius: 22px; transition: 0.25s; }
+.ic-switch span:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.25s; }
+.ic-switch input:checked + span { background: linear-gradient(45deg, #f09433, #dc2743, #bc1888); }
+.ic-switch input:checked + span:before { transform: translateX(18px); }
+.ic-switch input[type="range"] { accent-color: #0095f6; }
+input[type="range"] { accent-color: #0095f6; }
+
 .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(30px);
     background: #262626; color: #f5f5f5; padding: 10px 20px; border-radius: 24px; font-size: 14px;
     opacity: 0; transition: all 0.3s; pointer-events: none; border: 1px solid #3a3a3a; z-index: 9999;
@@ -1147,7 +1248,7 @@ const SHADOW_CSS = `
     background: #111;
     border-radius: 16px;
     padding: 20px;
-    width: min(400px, 92vw);
+    width: min(440px, 94vw);
     border: 1px solid #262626;
     flex-shrink: 0;
     margin: 0 0 auto 0;
@@ -1178,6 +1279,7 @@ function mountUI() {
             '<div id="overlay" class="overlay hidden">' +
                 '<div class="statusbar"><span id="clock">—</span><span>📶 🔋</span></div>' +
                 '<div class="topbar"><div class="topbar-title">Instagram</div><div class="topbar-actions">' +
+                    '<button class="icon-btn" id="btn-settings" title="ตั้งค่า">⚙</button>' +
                     '<button class="icon-btn" id="btn-refresh" title="Refresh">⟳</button>' +
                     '<button class="icon-btn" id="btn-close" title="Close">✕</button></div></div>' +
                 '<div class="screen"><div id="view"></div></div>' +
@@ -1234,6 +1336,7 @@ function mountUI() {
 
         shadowRoot.getElementById("btn-close").addEventListener("click", closePanel);
         shadowRoot.getElementById("btn-refresh").addEventListener("click", () => renderCurrentTab());
+        shadowRoot.getElementById("btn-settings").addEventListener("click", openInAppSettings);
         shadowRoot.querySelectorAll(".nav-item").forEach(btn => {
             btn.addEventListener("click", () => {
                 getGlobal().currentTab = btn.dataset.tab;
@@ -1339,6 +1442,153 @@ function showModal(html) {
 }
 function closeModal() { if (shadowRoot) shadowRoot.getElementById("modal-root").innerHTML = ""; }
 
+// 🆕 In-app Settings panel — opens from gear icon in topbar
+function openInAppSettings() {
+    if (!shadowRoot) return;
+    const g = getGlobal();
+    const currentStyle = g.artStyle || "modern";
+    const currentTokenMode = g.tokenMode || "medium";
+    const cfg = getTokenConfig();
+
+    const styleCards = Object.entries(ART_STYLES).map(([key, s]) => {
+        const isActive = key === currentStyle;
+        return `<div class="art-card ${isActive ? "active" : ""}" data-style="${key}">
+            <div class="art-preview"><img src="${makePreviewUrl(key)}" loading="lazy" onerror="this.style.opacity=0.3"/></div>
+            <div class="art-info">
+                <div class="art-name">${s.name}</div>
+                <div class="art-desc">${s.desc}</div>
+            </div>
+            ${isActive ? '<div class="art-active-badge">✓</div>' : ""}
+        </div>`;
+    }).join("");
+
+    const tokenModes = [
+        { key: "light", label: "🌱 เบา", hint: "1 NPC โพสต์ • ~1 LLM call/message", calls: "ประหยัด token" },
+        { key: "medium", label: "⚡ กลาง", hint: "2-3 NPCs + comments • ~2 LLM calls/message", calls: "สมดุล (แนะนำ)" },
+        { key: "heavy", label: "🔥 หนัก", hint: "3-4 NPCs + comments + gossip • ~3 LLM calls/message", calls: "เนื้อหาเยอะสุด" },
+    ];
+    const tokenCards = tokenModes.map(tm => {
+        const isActive = tm.key === currentTokenMode;
+        return `<div class="token-card ${isActive ? "active" : ""}" data-token="${tm.key}">
+            <div class="token-label">${tm.label}</div>
+            <div class="token-hint">${tm.hint}</div>
+            <div class="token-calls">${tm.calls}</div>
+        </div>`;
+    }).join("");
+
+    showModal(`
+        <h3 style="margin:0 0 4px 0;font-size:20px">⚙️ ตั้งค่า InstaChar</h3>
+        <div style="font-size:11px;color:#737373;margin-bottom:16px">v${VERSION}</div>
+
+        <div style="margin-bottom:18px">
+            <label style="display:block;font-size:13px;font-weight:700;color:#f5f5f5;margin-bottom:8px">🎨 ลายเส้น (Art Style)</label>
+            <div class="art-grid">${styleCards}</div>
+        </div>
+
+        <div style="margin-bottom:18px">
+            <label style="display:block;font-size:13px;font-weight:700;color:#f5f5f5;margin-bottom:4px">⚡ Token Mode (ระดับการใช้ token)</label>
+            <div style="font-size:11px;color:#a8a8a8;margin-bottom:8px">เลือกระดับความเข้มข้นของเนื้อหา/รอบ</div>
+            <div class="token-grid">${tokenCards}</div>
+        </div>
+
+        <div style="background:#0d0d0d;border-radius:10px;padding:12px;margin-bottom:14px">
+            <div style="font-size:13px;font-weight:700;margin-bottom:10px">⚙️ Toggles</div>
+            <div class="settings-toggle-row">
+                <div>
+                    <div style="font-size:13px">🎭 Multi-NPC Mode</div>
+                    <div style="font-size:11px;color:#737373">หลาย NPC โพสต์พร้อมกันใน 1 รอบ</div>
+                </div>
+                <label class="ic-switch"><input type="checkbox" id="setting-multinpc" ${g.multiNpc !== false ? "checked" : ""}/><span></span></label>
+            </div>
+            <div class="settings-toggle-row">
+                <div>
+                    <div style="font-size:13px">👀 NPC Gossip</div>
+                    <div style="font-size:11px;color:#737373">NPC แอบ DM นินทากันเอง (แอบดูได้!)</div>
+                </div>
+                <label class="ic-switch"><input type="checkbox" id="setting-gossip" ${g.npcGossip !== false ? "checked" : ""}/><span></span></label>
+            </div>
+            <div class="settings-toggle-row">
+                <div>
+                    <div style="font-size:13px">📸 Auto-post</div>
+                    <div style="font-size:11px;color:#737373">โพสต์เองเมื่อ AI ตอบ</div>
+                </div>
+                <label class="ic-switch"><input type="checkbox" id="setting-autopost" ${g.autoPost ? "checked" : ""}/><span></span></label>
+            </div>
+            <div style="margin-top:10px">
+                <label style="font-size:13px">📊 ความถี่โพสต์: <span id="chance-val" style="color:#0095f6">${Math.round(g.postChance * 100)}%</span></label>
+                <input type="range" id="setting-chance" min="10" max="100" step="5" value="${Math.round(g.postChance * 100)}" style="width:100%;margin-top:6px"/>
+            </div>
+        </div>
+
+        <div style="background:linear-gradient(135deg,rgba(0,149,246,0.1),rgba(220,39,67,0.06));border-radius:10px;padding:12px;margin-bottom:14px;border:1px solid rgba(0,149,246,0.2)">
+            <div style="font-size:12px;color:#0095f6;font-weight:700;margin-bottom:6px">💡 ฟีเจอร์ใหม่ใช้ได้ที่ไหน?</div>
+            <div style="font-size:11px;color:#a8a8a8;line-height:1.6">
+                • <b>Multi-NPC posts</b> — หน้า Feed (โพสต์หลายคนพร้อมกัน)<br/>
+                • <b>NPC Gossip</b> — แท็บ <b>ข้อความ</b> → "👀 ลือ NPC"<br/>
+                • <b>Smart Post Now</b> — แท็บ <b>Profile</b> ปุ่มสีชมพูล่างสุด<br/>
+                • <b>Mood badges</b> — เห็นใต้ชื่อในโพสต์/DM/Profile<br/>
+                • <b>@Tags</b> — แสดงใต้ caption ของโพสต์
+            </div>
+        </div>
+
+        <div style="display:flex;gap:8px">
+            <button class="secondary-btn" id="settings-close" style="flex:1">ปิด</button>
+            <button class="primary-btn" id="settings-save" style="flex:2;margin:0">💾 บันทึก</button>
+        </div>
+    `);
+
+    // art style picker
+    shadowRoot.querySelectorAll(".art-card").forEach(card => {
+        card.addEventListener("click", () => {
+            shadowRoot.querySelectorAll(".art-card").forEach(c => c.classList.remove("active"));
+            shadowRoot.querySelectorAll(".art-active-badge").forEach(b => b.remove());
+            card.classList.add("active");
+            const badge = document.createElement("div");
+            badge.className = "art-active-badge";
+            badge.textContent = "✓";
+            card.appendChild(badge);
+            getGlobal().artStyle = card.dataset.style;
+        });
+    });
+
+    // token mode picker
+    shadowRoot.querySelectorAll(".token-card").forEach(card => {
+        card.addEventListener("click", () => {
+            shadowRoot.querySelectorAll(".token-card").forEach(c => c.classList.remove("active"));
+            card.classList.add("active");
+            getGlobal().tokenMode = card.dataset.token;
+        });
+    });
+
+    // chance slider live update
+    const chanceSlider = shadowRoot.getElementById("setting-chance");
+    const chanceVal = shadowRoot.getElementById("chance-val");
+    chanceSlider.addEventListener("input", () => {
+        chanceVal.textContent = chanceSlider.value + "%";
+    });
+
+    shadowRoot.getElementById("settings-close").addEventListener("click", closeModal);
+    shadowRoot.getElementById("settings-save").addEventListener("click", () => {
+        const g2 = getGlobal();
+        g2.multiNpc = shadowRoot.getElementById("setting-multinpc").checked;
+        g2.npcGossip = shadowRoot.getElementById("setting-gossip").checked;
+        g2.autoPost = shadowRoot.getElementById("setting-autopost").checked;
+        g2.postChance = parseInt(chanceSlider.value) / 100;
+        // sync external SillyTavern panel
+        try {
+            $("#instachar-toggle-multinpc").prop("checked", g2.multiNpc);
+            $("#instachar-toggle-gossip").prop("checked", g2.npcGossip);
+            $("#instachar-toggle-autopost").prop("checked", g2.autoPost);
+            $("#instachar-chance-slider").val(Math.round(g2.postChance * 100));
+            $("#instachar-chance-val").text(Math.round(g2.postChance * 100) + "%");
+        } catch (e) {}
+        save();
+        closeModal();
+        toast("✓ บันทึกแล้ว — ลายเส้น: " + (ART_STYLES[g2.artStyle]?.name || "?"));
+        renderCurrentTab();
+    });
+}
+
 // ---------- Renderers ----------
 function renderCurrentTab() {
     const data = getCharData();
@@ -1368,13 +1618,17 @@ function renderFeed() {
     if (!data) return;
     const view = shadowRoot.getElementById("view");
     const posts = [...data.posts].reverse();
+    const g = getGlobal();
+    const cfg = getTokenConfig();
+    const styleName = ART_STYLES[g.artStyle || "modern"]?.name || "?";
 
-    const postBar = `<div class="post-bar" style="justify-content:center;color:#a8a8a8;font-size:12px">
-        🤖 Auto-post activated — Characters post themselves! ✨
+    const postBar = `<div class="post-bar" style="justify-content:space-between;color:#a8a8a8;font-size:12px;align-items:center">
+        <span>🤖 ${cfg.label} • ${styleName}</span>
+        <span style="opacity:0.6">⚙ มุมขวาบน → ตั้งค่า</span>
     </div>`;
 
     if (posts.length === 0) {
-        view.innerHTML = postBar + '<div class="empty"><div class="empty-icon">📷</div><div class="empty-title">ยังไม่มีโพสต์</div><div class="empty-sub">ลองคุยกับตัวละคร เขาจะโพสต์เอง!</div></div>';
+        view.innerHTML = postBar + '<div class="empty"><div class="empty-icon">📷</div><div class="empty-title">ยังไม่มีโพสต์</div><div class="empty-sub">ลองคุยกับตัวละคร เขาจะโพสต์เอง!<br/><br/>หรือกดปุ่ม <b style="color:#dc2743">🎭 ให้ NPC โพสต์เลย!</b><br/>ในแท็บ Profile (ไอคอนขวาสุด)</div></div>';
         return;
     }
 
@@ -2207,26 +2461,25 @@ async function onMessageReceived() {
         const data = getCharData();
         if (!data) return;
         const sceneText = msg.mes || "";
+        const cfg = getTokenConfig();
 
-        // 🆕 Multi-NPC smart batch (default ON, controlled by g.multiNpc)
-        if (g.multiNpc !== false && data.npcs.length >= 2) {
-            log(`🎭 Multi-NPC mode: ${data.npcs.length} NPCs available`);
-            const created = await generateMultiNpcPosts(sceneText, { min: 2, max: 4 });
+        // 🆕 Multi-NPC mode based on tokenMode preset
+        if (cfg.useMulti && g.multiNpc !== false && data.npcs.length >= 2) {
+            log(`🎭 Multi-NPC mode (${cfg.label}): ${data.npcs.length} NPCs available`);
+            const created = await generateMultiNpcPosts(sceneText, { min: cfg.multiMin, max: cfg.multiMax, crossComments: cfg.crossComments });
             if (created.length > 0) {
-                // 🆕 Bonus: occasionally also generate NPC-to-NPC DM peek (gossip mode)
-                if (g.npcGossip !== false && Math.random() < 0.4 && data.npcs.length >= 2) {
+                if (g.npcGossip !== false && cfg.gossipChance > 0 && Math.random() < cfg.gossipChance && data.npcs.length >= 2) {
                     await generateNpcToNpcDM(sceneText);
                 }
                 return;
             }
-            // fallback to single-NPC if batch failed
         }
 
-        // Fallback / single-NPC mode
+        // Light mode / fallback — single NPC posts
         let npc = msg.name ? findNpcByName(msg.name) : null;
         if (!npc) npc = ensureNpcFromCharacterCard();
         if (!npc) { log("Auto-post skipped: no NPC found", true); return; }
-        log(`🤖 Auto-posting for: ${npc.name} (Role: ${npc.role || "unknown"})`);
+        log(`🤖 Single-NPC post (${cfg.label}): ${npc.name}`);
         await generatePostFor(npc, sceneText);
     } catch (e) { log("message handler: " + e.message, true); }
 }
@@ -2466,6 +2719,6 @@ jQuery(async () => {
             } catch (e) { log("event bind: " + e.message, true); }
         }
         if (getGlobal().ambientEnabled) scheduleAmbient();
-        log("✅ Ready! v" + VERSION + " — Multi-NPC + Anime Style + Gossip Peek + DM Layout Fix");
+        log("✅ Ready! v" + VERSION + " — 5 Art Styles + Token Modes + In-app Settings (gear icon)");
     } catch (e) { log("Init FAILED: " + e.message, true); }
 });
