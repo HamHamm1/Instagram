@@ -1,10 +1,16 @@
 <div class="instachar-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b>📱 InstaChar v0.10.0 — Character Instagram (Multi-NPC + Anime + Gossip)</b>
+            <b>📱 InstaChar v0.11 — Multi-NPC + 5 Art Styles + In-app Settings</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
+
+            <div class="instachar-row" style="background:linear-gradient(90deg,rgba(0,149,246,0.08),rgba(220,39,67,0.05));border-radius:8px;padding:12px;border:1px solid rgba(0,149,246,0.25);flex-direction:column;align-items:stretch">
+                <div style="font-size:13px;font-weight:700;color:#0095f6;margin-bottom:6px">⚙️ ตั้งค่าทั้งหมดอยู่ในแอป!</div>
+                <div class="hint" style="margin-bottom:8px">เปิดแอป InstaChar → กด ⚙ ที่มุมขวาบน<br/>(ลายเส้น 5 แบบ • Token Mode • Toggles • พรีวิว)</div>
+                <button id="instachar-open-btn" class="menu_button" type="button" style="margin-top:4px">📱 เปิดแอป InstaChar</button>
+            </div>
 
             <div class="instachar-row">
                 <div>
@@ -28,10 +34,10 @@
                 </label>
             </div>
 
-            <div class="instachar-row" style="background:linear-gradient(90deg,rgba(220,39,67,0.06),rgba(188,24,136,0.06));border-radius:8px;padding:10px;border:1px solid rgba(220,39,67,0.2)">
+            <div class="instachar-row">
                 <div>
-                    <label for="instachar-toggle-multinpc">🎭 Multi-NPC Mode (แนะนำ!)</label>
-                    <div class="hint">1 LLM call → NPCs 2-4 ตัวโพสต์พร้อมกัน + comment กันเอง<br/>ใช้ token เต็มประสิทธิภาพ ได้ข้อความเยอะ คุ้มสุด</div>
+                    <label for="instachar-toggle-multinpc">🎭 Multi-NPC Mode</label>
+                    <div class="hint">หลาย NPC โพสต์พร้อมกัน + comment กันเอง</div>
                 </div>
                 <label class="instachar-toggle">
                     <input type="checkbox" id="instachar-toggle-multinpc" checked />
@@ -39,10 +45,10 @@
                 </label>
             </div>
 
-            <div class="instachar-row" style="background:linear-gradient(90deg,rgba(255,107,107,0.06),rgba(255,193,7,0.06));border-radius:8px;padding:10px;border:1px solid rgba(255,107,107,0.2)">
+            <div class="instachar-row">
                 <div>
-                    <label for="instachar-toggle-gossip">👀 NPC Gossip (แอบดู DM)</label>
-                    <div class="hint">NPCs จะ DM นินทากันเองหลังเหตุการณ์<br/>คุณสามารถ "แอบดู" ได้ในแท็บข้อความ → ลือ NPC</div>
+                    <label for="instachar-toggle-gossip">👀 NPC Gossip</label>
+                    <div class="hint">NPC แอบ DM นินทากันเอง (แอบดูได้)</div>
                 </div>
                 <label class="instachar-toggle">
                     <input type="checkbox" id="instachar-toggle-gossip" checked />
@@ -71,14 +77,6 @@
 
             <div class="instachar-row">
                 <div>
-                    <label>เปิดแอป InstaChar</label>
-                    <div class="hint">เปิดหน้า IG ของตัวละคร</div>
-                </div>
-                <button id="instachar-open-btn" class="menu_button" type="button">เปิด</button>
-            </div>
-
-            <div class="instachar-row">
-                <div>
                     <label>หาไอคอน (ไฟกระพริบ)</label>
                     <div class="hint">ถ้าหาไอคอนไม่เจอ กดให้มันกระพริบ</div>
                 </div>
@@ -88,7 +86,6 @@
             <div class="instachar-row">
                 <div>
                     <label>รีเซ็ตตำแหน่งไอคอน</label>
-                    <div class="hint">ย้ายไอคอนกลับตำแหน่งเริ่มต้น</div>
                 </div>
                 <button id="instachar-reset-pos-btn" class="menu_button" type="button">รีเซ็ต</button>
             </div>
@@ -112,7 +109,7 @@
             <div class="instachar-row">
                 <div>
                     <label>About</label>
-                    <div class="hint">InstaChar v0.10.0 · Multi-NPC + Anime + Gossip</div>
+                    <div class="hint">InstaChar v0.11.0 · 5 Art Styles + Token Modes + In-app Settings</div>
                 </div>
                 <a href="https://github.com/HamHamm1/Instagram" target="_blank" rel="noopener" class="menu_button" style="text-decoration: none;">GitHub ↗</a>
             </div>
