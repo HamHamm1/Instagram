@@ -1,11 +1,11 @@
-/* InstaChar v0.13.0 — Fix: floating icon migration + flux model + gossip name parser */
+/* InstaChar v0.13.1 — BULLETPROOF body icon (works without Shadow DOM) */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.13.0";
+const VERSION = "0.13.1";
 
 // ✅ Role detection mapping
 const ROLE_KEYWORDS = {
@@ -1416,9 +1416,21 @@ function mountUI() {
 }
 
 function setFloaterVisible(v) {
-    if (!shadowRoot) return;
-    const el = shadowRoot.getElementById("floater");
-    if (el) { if (v) el.classList.remove("hidden"); else el.classList.add("hidden"); }
+    // shadow icon
+    try {
+        if (shadowRoot) {
+            const el = shadowRoot.getElementById("floater");
+            if (el) { if (v) el.classList.remove("hidden"); else el.classList.add("hidden"); }
+        }
+    } catch (e) {}
+    // body icon — primary
+    const bodyIcon = document.getElementById("instachar-body-icon");
+    if (v) {
+        if (!bodyIcon) ensureBodyIcon();
+        else bodyIcon.style.display = "flex";
+    } else {
+        if (bodyIcon) bodyIcon.style.display = "none";
+    }
 }
 
 function flashIcon() {
@@ -1432,14 +1444,188 @@ function flashIcon() {
 }
 
 function findIcon() {
-    if (!shadowRoot) return;
-    const el = shadowRoot.getElementById("floater");
-    if (!el) return;
-    el.classList.add("flash");
-    setTimeout(() => el.classList.remove("flash"), 3000);
+    // body icon
+    const bodyIcon = document.getElementById("instachar-body-icon");
+    if (bodyIcon) {
+        const orig = bodyIcon.style.background;
+        bodyIcon.style.background = "red";
+        bodyIcon.style.transform = "scale(1.5)";
+        setTimeout(() => {
+            bodyIcon.style.background = orig;
+            bodyIcon.style.transform = "";
+        }, 3000);
+    } else {
+        // No icon at all — try rescue
+        ensureBodyIcon();
+        toast("✓ สร้าง icon ใหม่แล้ว");
+    }
+    // shadow flash too
+    try {
+        if (shadowRoot) {
+            const el = shadowRoot.getElementById("floater");
+            if (el) {
+                el.classList.add("flash");
+                setTimeout(() => el.classList.remove("flash"), 3000);
+            }
+        }
+    } catch (e) {}
 }
 
-function resetIconPos() { getGlobal().iconPos = null; save(); mountUI(); toast("รีเซ็ตตำแหน่งแล้ว"); }
+function resetIconPos() { getGlobal().iconPos = null; save(); mountUI(); ensureBodyIcon(); toast("รีเซ็ตตำแหน่งแล้ว"); }
+
+// 🆕 v0.13.1 — BULLETPROOF Body Icon
+// Lives directly in document.body (not Shadow DOM), so it shows even if Shadow DOM fails.
+// Works as primary icon; calls openPanel() which still uses Shadow DOM for the IG overlay.
+// If Shadow DOM is broken, openPanel will rebuild it on demand.
+function ensureBodyIcon() {
+    try {
+        // remove any old version
+        const old = document.getElementById("instachar-body-icon");
+        if (old) old.remove();
+
+        const g = getGlobal();
+        if (g.iconVisible === false) return; // user explicitly hid it
+
+        const btn = document.createElement("button");
+        btn.id = "instachar-body-icon";
+        btn.title = "InstaChar";
+        btn.innerHTML = "📱";
+
+        // Inline styles — robust against host CSS overrides
+        const pos = g.iconPos || { right: 16, top: 150 };
+        const css = {
+            position: "fixed",
+            right: (typeof pos.right === "number" ? pos.right : 16) + "px",
+            top: (typeof pos.top === "number" ? pos.top : 150) + "px",
+            width: "58px",
+            height: "58px",
+            borderRadius: "18px",
+            background: "linear-gradient(135deg,#667eea 0%,#764ba2 50%,#f093fb 100%)",
+            border: "none",
+            boxShadow: "0 15px 35px rgba(102,126,234,0.4),0 5px 15px rgba(118,75,162,0.3),0 0 0 2px rgba(255,255,255,0.15)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "white",
+            fontSize: "30px",
+            zIndex: "2147483647",
+            userSelect: "none",
+            webkitTapHighlightColor: "transparent",
+            touchAction: "none",
+            padding: "0",
+        };
+        Object.assign(btn.style, css);
+
+        // Badge for unread
+        const badge = document.createElement("span");
+        badge.id = "instachar-body-badge";
+        Object.assign(badge.style, {
+            position: "absolute",
+            top: "-6px",
+            right: "-6px",
+            minWidth: "20px",
+            height: "20px",
+            padding: "0 6px",
+            background: "#ff2d55",
+            color: "white",
+            fontSize: "11px",
+            fontWeight: "700",
+            borderRadius: "10px",
+            display: "none",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "2px solid #000",
+        });
+        badge.textContent = "0";
+        btn.appendChild(badge);
+
+        // Drag-to-move logic
+        let pDown = false, pStartX = 0, pStartY = 0, pMoved = false;
+        btn.addEventListener("pointerdown", (e) => {
+            pDown = true; pStartX = e.clientX; pStartY = e.clientY; pMoved = false;
+            btn.style.transform = "scale(0.92)";
+            try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+        });
+        btn.addEventListener("pointermove", (e) => {
+            if (!pDown) return;
+            const dx = e.clientX - pStartX, dy = e.clientY - pStartY;
+            if (Math.abs(dx) > 6 || Math.abs(dy) > 6) pMoved = true;
+            if (pMoved) {
+                const newRight = window.innerWidth - e.clientX - 29;
+                const newTop = e.clientY - 29;
+                btn.style.right = Math.max(0, Math.min(window.innerWidth - 58, newRight)) + "px";
+                btn.style.top = Math.max(0, Math.min(window.innerHeight - 58, newTop)) + "px";
+                btn.style.bottom = "auto";
+            }
+        });
+        btn.addEventListener("pointerup", (e) => {
+            pDown = false;
+            btn.style.transform = "";
+            if (pMoved) {
+                const r = btn.getBoundingClientRect();
+                getGlobal().iconPos = {
+                    right: Math.round(window.innerWidth - r.right),
+                    top: Math.round(r.top),
+                };
+                save();
+            } else {
+                openPanelSafe();
+            }
+        });
+        btn.addEventListener("pointercancel", () => { pDown = false; btn.style.transform = ""; });
+
+        document.body.appendChild(btn);
+        log("✓ Body icon mounted directly to <body>");
+    } catch (e) {
+        log("ensureBodyIcon failed: " + e.message, true);
+        console.error("[InstaChar] ensureBodyIcon failed:", e);
+    }
+}
+
+// Update badge on body icon (in addition to shadow icon)
+function updateBodyBadge() {
+    try {
+        const data = getCharData();
+        const b = document.getElementById("instachar-body-badge");
+        if (!b) return;
+        const n = (data && data.unreadCount) || 0;
+        if (n > 0) { b.textContent = n > 99 ? "99+" : String(n); b.style.display = "flex"; }
+        else { b.style.display = "none"; }
+    } catch (e) {}
+}
+
+// Bulletproof openPanel — rebuilds Shadow DOM if missing
+function openPanelSafe() {
+    try {
+        if (!shadowRoot || !shadowRoot.getElementById("overlay")) {
+            log("⚠️ Shadow not ready — rebuilding...", true);
+            mountUI();
+        }
+        openPanel();
+    } catch (e) {
+        log("openPanelSafe failed: " + e.message, true);
+        alert("InstaChar: เปิดแอปไม่ได้\n\n" + e.message + "\n\nลอง: รีเฟรช SillyTavern (F5)");
+    }
+}
+
+// 🆕 Global rescue function — user can run window.__instaCharRescue() in console
+window.__instaCharRescue = function() {
+    console.log("[InstaChar] Running rescue...");
+    try {
+        const g = getGlobal();
+        g.iconVisible = true;
+        g.iconPos = null;
+        save();
+        ensureBodyIcon();
+        try { mountUI(); } catch (e) { console.error("mountUI:", e); }
+        console.log("[InstaChar] Rescue complete. Icon should now be visible top-right.");
+        return "OK — look top-right of screen";
+    } catch (e) {
+        console.error("[InstaChar] Rescue failed:", e);
+        return "FAILED: " + e.message;
+    }
+};
 
 function openPanel() {
     if (!shadowRoot) return;
@@ -1469,13 +1655,20 @@ function updateClock() {
 }
 
 function updateBadge() {
-    if (!shadowRoot) return;
-    const data = getCharData();
-    const n = data ? (data.unreadCount || 0) : 0;
-    const badge = shadowRoot.getElementById("badge");
-    if (!badge) return;
-    if (n > 0) { badge.textContent = n > 99 ? "99+" : n; badge.classList.remove("hidden"); }
-    else badge.classList.add("hidden");
+    // shadow badge
+    try {
+        if (shadowRoot) {
+            const data = getCharData();
+            const n = data ? (data.unreadCount || 0) : 0;
+            const badge = shadowRoot.getElementById("badge");
+            if (badge) {
+                if (n > 0) { badge.textContent = n > 99 ? "99+" : n; badge.classList.remove("hidden"); }
+                else badge.classList.add("hidden");
+            }
+        }
+    } catch (e) {}
+    // body badge (always update, regardless of shadow state)
+    updateBodyBadge();
 }
 
 function updateNavActive() {
@@ -2754,29 +2947,42 @@ function attachDelegation() {
 // ---------- Init ----------
 jQuery(async () => {
     log("InstaChar v" + VERSION + " init...");
+    console.log("[InstaChar] Starting init v" + VERSION);
     try {
         const g = getGlobal();
 
         // 🆕 v0.13 migration: force-show icon on upgrade so users always see it after install
         if (g._lastVersion !== VERSION) {
             log(`Upgrade detected: ${g._lastVersion || "fresh install"} → ${VERSION} — force-showing icon`);
-            g.iconVisible = true;       // always make icon visible after upgrade
-            g.iconPos = null;           // reset position so it lands at default top: 150px right: 16px
+            g.iconVisible = true;
+            g.iconPos = null;
             g._lastVersion = VERSION;
             save();
         }
 
+        // 🆕 v0.13.1: Mount BODY ICON FIRST — this is bulletproof, doesn't depend on Shadow DOM
+        ensureBodyIcon();
+
         attachDelegation();
         await loadSettingsUI();
-        mountUI();
 
-        // 🆕 v0.13: retry mount if shadow DOM didn't initialize properly
+        // mountUI is now optional — if it fails, body icon still works
+        try { mountUI(); }
+        catch (e) { log("mountUI failed (body icon still active): " + e.message, true); console.error("[InstaChar] mountUI:", e); }
+
+        // Re-ensure body icon after mountUI (which removes any orphaned shadowHost)
+        ensureBodyIcon();
+
+        // Retry mount if shadow DOM didn't initialize properly (after 1.5s)
         setTimeout(() => {
             if (!shadowRoot || !shadowRoot.getElementById("floater")) {
-                log("⚠️ Floater missing — retrying mountUI()", true);
-                try { mountUI(); } catch (e) { log("retry failed: " + e.message, true); }
-            } else {
-                log("✓ Floater confirmed mounted");
+                log("⚠️ Shadow icon missing — body icon still works", true);
+                try { mountUI(); } catch (e) { log("retry mountUI failed: " + e.message, true); }
+            }
+            // Always re-ensure body icon
+            if (!document.getElementById("instachar-body-icon")) {
+                log("⚠️ Body icon disappeared — re-mounting");
+                ensureBodyIcon();
             }
         }, 1500);
 
@@ -2787,6 +2993,12 @@ jQuery(async () => {
             } catch (e) { log("event bind: " + e.message, true); }
         }
         if (getGlobal().ambientEnabled) scheduleAmbient();
-        log("✅ Ready! v" + VERSION + " — Fix: icon migration + flux model + gossip names");
-    } catch (e) { log("Init FAILED: " + e.message, true); console.error("[InstaChar] Init failed:", e); }
+        log("✅ Ready! v" + VERSION + " — Bulletproof body icon active");
+        console.log("[InstaChar] ✅ Ready. If icon is missing, run: window.__instaCharRescue()");
+    } catch (e) {
+        log("Init FAILED: " + e.message, true);
+        console.error("[InstaChar] Init failed:", e);
+        // Last resort — try to at least mount the body icon
+        try { ensureBodyIcon(); } catch (_) {}
+    }
 });
