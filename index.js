@@ -1,70 +1,11 @@
-/* InstaChar v0.13.2 — TOP-LEVEL icon mount (runs immediately on script load) */
+/* InstaChar v0.14.0 — New features on v0.9 stable base */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.13.2";
-
-// 🆕 v0.13.2: TOP-LEVEL ICON — runs the moment this script loads
-// No jQuery, no Shadow DOM, no async — just put a button in the body NOW.
-// If this doesn't show, the JS module isn't loading at all.
-(function topLevelIconMount() {
-    const mount = () => {
-        try {
-            if (document.getElementById("instachar-body-icon")) return; // already there
-            const btn = document.createElement("button");
-            btn.id = "instachar-body-icon";
-            btn.title = "InstaChar";
-            btn.innerHTML = '📱<span id="instachar-body-badge" style="position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 6px;background:#ff2d55;color:white;font-size:11px;font-weight:700;border-radius:10px;display:none;align-items:center;justify-content:center;border:2px solid #000">0</span>';
-            btn.setAttribute("style", [
-                "position:fixed",
-                "right:16px",
-                "top:150px",
-                "width:58px",
-                "height:58px",
-                "border-radius:18px",
-                "background:linear-gradient(135deg,#667eea 0%,#764ba2 50%,#f093fb 100%)",
-                "border:none",
-                "box-shadow:0 15px 35px rgba(102,126,234,0.4),0 5px 15px rgba(118,75,162,0.3),0 0 0 2px rgba(255,255,255,0.15)",
-                "cursor:pointer",
-                "display:flex",
-                "align-items:center",
-                "justify-content:center",
-                "color:white",
-                "font-size:30px",
-                "z-index:2147483647",
-                "user-select:none",
-                "-webkit-tap-highlight-color:transparent",
-                "touch-action:none",
-                "padding:0",
-            ].join(";"));
-            // click handler — wired later in init when openPanelSafe is defined
-            btn.addEventListener("click", function () {
-                try {
-                    if (typeof openPanelSafe === "function") openPanelSafe();
-                    else alert("InstaChar กำลังโหลด... ลองอีกครั้งใน 3 วินาที");
-                } catch (e) { console.error("[InstaChar] click:", e); }
-            });
-            document.body.appendChild(btn);
-            console.log("[InstaChar] ✅ Top-level icon mounted at top:150 right:16");
-        } catch (e) {
-            console.error("[InstaChar] top-level mount failed:", e);
-        }
-    };
-    if (document.body) {
-        mount();
-    } else if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", mount);
-    } else {
-        // edge case: docElement exists but no body yet
-        setTimeout(mount, 100);
-    }
-    // also try again later, in case body wasn't ready
-    setTimeout(mount, 1000);
-    setTimeout(mount, 3000);
-})();
+const VERSION = "0.14.0";
 
 // ✅ Role detection mapping
 const ROLE_KEYWORDS = {
@@ -81,40 +22,17 @@ const ROLE_KEYWORDS = {
 
 const DEFAULT_GLOBAL = {
     iconVisible: true,
-    autoPost: false,           // 🆕 v0.12: default OFF — let user opt-in (manual mode = $0 unless asked)
+    autoPost: false,
     ambientEnabled: false,
-    postChance: 0.30,          // 🆕 v0.12: lower default (was 0.45)
+    postChance: 0.30,
     iconPos: null,
     currentTab: "feed",
     characters: {},
+    artStyle: "modern",
     multiNpc: true,
     npcGossip: true,
-    longCaptions: true,
-    artStyle: "modern",
-    tokenMode: "heavy",        // 🆕 v0.12: default to heavy — 1 call gives MAX content (best value)
-    cooldownEnabled: true,     // 🆕 v0.12: prevent rapid-fire $5 calls
-    cooldownSeconds: 30,
-    llmStats: { totalCalls: 0, sessionCalls: 0, sessionStart: 0, lastTag: "", lastCallAt: 0 },
-    _lastVersion: "",  // 🆕 v0.13: tracks version for migrations (forces icon visible after upgrade)
+    tokenMode: "heavy",
 };
-
-// 🆕 v0.12 — All modes use 1 LLM call. Modes only differ in HOW MUCH content packed into that call.
-// Each call costs $5 flat-rate, so HEAVY mode = best value (most content for same $5).
-function getTokenConfig() {
-    const g = getGlobal();
-    const mode = g.tokenMode || "heavy";
-    if (mode === "light") {
-        return { useMulti: true, multiMin: 1, multiMax: 2, gossipChance: 0,
-                 commentCount: "3-5", captionLen: "3-5 sentences", label: "เบา ($5/call)" };
-    }
-    if (mode === "medium") {
-        return { useMulti: true, multiMin: 2, multiMax: 3, gossipChance: 0.4,
-                 commentCount: "5-7", captionLen: "4-6 sentences", label: "กลาง ($5/call)" };
-    }
-    // heavy (default) — pack the response with as much content as possible per $5
-    return { useMulti: true, multiMin: 3, multiMax: 4, gossipChance: 1.0,
-             commentCount: "6-9", captionLen: "5-8 sentences", label: "หนัก ($5/call — คุ้มสุด!)" };
-}
 
 function newCharData() {
     return {
@@ -122,7 +40,7 @@ function newCharData() {
         npcs: [],
         posts: [],
         dms: {},
-        npcDms: {}, // 🆕 NPC-to-NPC gossip threads (key: sorted "id1__id2")
+        npcDms: {},
         userProfile: { username: "", displayName: "", bio: "", avatar: "" },
         unreadCount: 0,
         selectedProfile: null,
@@ -243,7 +161,7 @@ function getCharData() {
     if (!d.npcs) d.npcs = [];
     if (!d.posts) d.posts = [];
     if (!d.dms) d.dms = {};
-    if (!d.npcDms) d.npcDms = {}; // 🆕 migration for older saves
+    if (!d.npcDms) d.npcDms = {};
     if (!d.userProfile) d.userProfile = { username: "", displayName: "", bio: "", avatar: "" };
     if (d.unreadCount === undefined) d.unreadCount = 0;
     return d;
@@ -277,80 +195,33 @@ function sanitizeUsername(name) {
     return name.toLowerCase().replace(/[^a-z0-9_\u0e00-\u0e7f]/g, "").slice(0, 20) || "user";
 }
 
-// 🎨 5 Art Styles (v0.13 — switched to default flux model + cleaner prompts)
-// Pollinations now defaults to flux which gives much better anatomy than flux-anime
-// We embed "anime style" in the prompt itself rather than relying on a model suffix
+// 🆕 5 Art Styles — เลือกได้ในหน้า Settings (⚙ มุมขวาบน)
 const ART_STYLES = {
-    "modern": {
-        name: "🎨 Modern Anime",
-        desc: "Makoto Shinkai vibe — สวย cinematic",
-        prefix: "anime artwork, ",
-        suffix: ", makoto shinkai style, beautiful detailed face, perfect anatomy, soft cinematic lighting, masterpiece, high quality",
-        model: "flux",
-        previewPrompt: "young man portrait, soft sunset bedroom light, peaceful expression",
-    },
-    "ghibli": {
-        name: "🌿 Ghibli",
-        desc: "Miyazaki watercolor อบอุ่น",
-        prefix: "studio ghibli anime, ",
-        suffix: ", hayao miyazaki style, watercolor painting, warm natural light, hand-drawn, perfect anatomy, beautiful scenery, masterpiece",
-        model: "flux",
-        previewPrompt: "young man in countryside afternoon, warm watercolor sky",
-    },
-    "shoujo": {
-        name: "✨ Shoujo / BL",
-        desc: "BL pastel sparkly อ่อนหวาน",
-        prefix: "shoujo manga anime, ",
-        suffix: ", BL aesthetic, soft pastel colors, sparkles, beautiful detailed face, perfect anatomy, glossy eyes, blush, romantic atmosphere, masterpiece",
-        model: "flux",
-        previewPrompt: "handsome young man portrait, soft pink lighting, gentle smile",
-    },
-    "cyberpunk": {
-        name: "🌃 Cyberpunk",
-        desc: "Tokyo neon เมืองดึก",
-        prefix: "cyberpunk anime, ",
-        suffix: ", neon tokyo night, rain reflections, vibrant colors, perfect anatomy, detailed face, dramatic lighting, masterpiece",
-        model: "flux",
-        previewPrompt: "young man on neon tokyo street at night, rain, glowing signs",
-    },
-    "manga": {
-        name: "📖 Manga B&W",
-        desc: "Manga ขาวดำ screentone",
-        prefix: "manga illustration, ",
-        suffix: ", black and white, ink drawing, screentone shading, perfect anatomy, detailed sharp lineart, dramatic contrast, masterpiece",
-        model: "flux",
-        previewPrompt: "young man portrait, dramatic light, manga style",
-    },
+    "modern": { name: "🎨 Modern Anime", desc: "Makoto Shinkai vibe", prefix: "anime artwork, ", suffix: ", beautiful face, perfect anatomy, soft cinematic lighting, masterpiece", model: "flux" },
+    "ghibli": { name: "🌿 Ghibli",        desc: "Miyazaki watercolor", prefix: "studio ghibli anime, ", suffix: ", warm natural light, perfect anatomy, masterpiece", model: "flux" },
+    "shoujo": { name: "✨ Shoujo / BL",   desc: "BL pastel sparkly",   prefix: "shoujo manga anime, ", suffix: ", soft pastel, sparkles, beautiful face, perfect anatomy, masterpiece", model: "flux" },
+    "cyberpunk": { name: "🌃 Cyberpunk", desc: "neon tokyo",           prefix: "cyberpunk anime, ",   suffix: ", neon lights, rain, perfect anatomy, dramatic lighting, masterpiece", model: "flux" },
+    "manga": { name: "📖 Manga B&W",     desc: "ขาวดำ screentone",     prefix: "manga illustration, ", suffix: ", black and white, screentone, perfect anatomy, sharp lineart, masterpiece", model: "flux" },
 };
-
-// Stronger negative — fixes "missing arms, deformed hands, broken anatomy" issues
-const ANIME_NEGATIVE = "deformed, mutated, extra limbs, missing limbs, missing arms, missing hands, bad hands, bad anatomy, malformed, ugly, blurry, low quality, watermark, text, signature, realistic photo, 3d render, distorted face";
+const IMG_NEGATIVE = "deformed,mutated,extra limbs,missing limbs,missing arms,bad anatomy,ugly,blurry,watermark,text";
 
 const imageCache = new Map();
 function makeImageUrl(prompt, seed) {
     const g = getGlobal();
-    const styleKey = g.artStyle || "modern";
-    const style = ART_STYLES[styleKey] || ART_STYLES.modern;
-    const cacheKey = styleKey + "_" + (prompt || "default") + "_" + seed;
+    const st = ART_STYLES[g.artStyle || "modern"] || ART_STYLES.modern;
+    const cacheKey = (g.artStyle || "modern") + "_" + (prompt || "default") + "_" + seed;
     if (imageCache.has(cacheKey)) return imageCache.get(cacheKey);
-    const cleanPrompt = (prompt || "aesthetic mood scene").replace(/(real|realistic|photo(graph)?|3d render)/gi, "");
-    const finalPrompt = (style.prefix || "") + cleanPrompt + (style.suffix || "");
-    const p = encodeURIComponent(finalPrompt);
-    const neg = encodeURIComponent(ANIME_NEGATIVE);
-    // 512x512 — flux renders better at standard sizes; enhance=true asks pollinations to improve prompt
-    const url = "https://image.pollinations.ai/prompt/" + p + "?width=512&height=512&nologo=true&model=" + style.model + "&enhance=true&negative=" + neg + "&seed=" + (seed || Math.floor(Math.random() * 99999));
-    if (imageCache.size > 80) { const firstKey = imageCache.keys().next().value; imageCache.delete(firstKey); }
+    const clean = (prompt || "anime scene").replace(/(real|realistic|photo)/gi, "");
+    const full = st.prefix + clean + st.suffix;
+    const url = "https://image.pollinations.ai/prompt/" + encodeURIComponent(full)
+        + "?width=512&height=512&nologo=true&model=" + st.model
+        + "&enhance=true&negative=" + encodeURIComponent(IMG_NEGATIVE)
+        + "&seed=" + (seed || Math.floor(Math.random() * 99999));
+    if (imageCache.size > 80) imageCache.delete(imageCache.keys().next().value);
     imageCache.set(cacheKey, url);
     return url;
 }
 
-function makePreviewUrl(styleKey) {
-    const style = ART_STYLES[styleKey] || ART_STYLES.modern;
-    const finalPrompt = (style.prefix || "") + style.previewPrompt + (style.suffix || "");
-    const p = encodeURIComponent(finalPrompt);
-    const neg = encodeURIComponent(ANIME_NEGATIVE);
-    return "https://image.pollinations.ai/prompt/" + p + "?width=400&height=400&nologo=true&model=" + style.model + "&enhance=true&negative=" + neg + "&seed=" + (42 + Object.keys(ART_STYLES).indexOf(styleKey));
-}
 
 function parseJson(text) {
     if (!text) return null;
@@ -670,219 +541,71 @@ function buildCharContext(npc) {
 }
 
 // ---------- Post Generation ----------
-async function generatePostFor(npc, sceneContext) {
-    const data = getCharData();
-    if (!data || !npc) return null;
-    const charCtx = buildCharContext(npc);
-    const sceneText = sceneContext ? sceneContext.slice(0, 1200) : "(random slice-of-life moment, write something natural for this character's daily life)";
-    const cfg = getTokenConfig();
-
-    const otherNpcs = data.npcs.filter(n => n.id !== npc.id);
-    const taggableNpcs = otherNpcs.map(n => `@${n.username} (${n.name}${n.role ? ", " + n.role : ""})`).join(", ");
-    const recentPosts = data.posts.slice(-5).reverse().map(p =>
-        `- ${p.author} โพสต์ "${(p.caption || "").slice(0, 100)}" (${timeAgo(p.timestamp)}ก่อน)`
-    ).join("\n");
-
-    // 🆕 ALWAYS bundle comments inline (= 1 call only, $5 saved)
-    const prompt = `[Instagram Post — Single Character + Inline Comments (1 LLM Call Only)]
-
-${charCtx}
-
-📍 Scene/Event:
-${sceneText}
-
-📰 Recent IG posts:
-${recentPosts || "(no recent posts)"}
-
-👥 Other characters you can @tag:
-${taggableNpcs || "(no other characters)"}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Generate IN ONE RESPONSE:
-
-1️⃣ POST as "${npc.name}":
-   - Thai caption: ${cfg.captionLen}, EXACT pronouns/slang, reference scene specifically
-   - 6-10 hashtags (Thai/English mix)
-   - Image prompt: 15-25 English words, anime art scene
-   - Mood: happy/sad/flirty/chill/excited/moody/proud/jealous/lonely/mischievous/thoughtful/tired/hyped/angry/soft
-   - Tags: array of @usernames you tagged
-
-2️⃣ COMMENTS on this post (${cfg.commentCount} total):
-   - Mix: 1-2 NPCs from "Other characters" list (use @username, in character) + ${otherNpcs.length > 0 ? "anonymous followers" : "anonymous followers only"}
-   - Thai, 3-15 words each, varied voices
-   - NEVER from "${getUserName()}" or "${npc.name}"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Respond ONLY with minified JSON:
-{"caption":"thai","imagePrompt":"english","hashtags":["#a"],"mood":"chill","tags":["@u"],"comments":[{"username":"name","text":"thai","npcId":"id_or_null"}]}`;
-    try {
-        const systemPrompt = `You are an Instagram caption writer for Thai BL/slice-of-life roleplay.
-- Channel "${npc.name}" PERFECTLY: pronouns, slang, emotional patterns
-- Role: "${npc.role || "unknown"}"
-- Output VALID minified JSON only.`;
-        const response = await callLLM(prompt, systemPrompt);
-        const d = parseJson(response);
-        if (!d || !d.caption) { log("Post JSON invalid", true); return null; }
-        const likes = Math.max(8, Math.floor((npc.followers || 1000) * (0.3 + Math.random() * 1.6) / 10));
-        const userName = getUserName();
-        const post = {
-            id: uid("p"),
-            authorId: npc.id,
-            author: npc.name,
-            authorUsername: npc.username,
-            authorAvatar: npc.avatar,
-            caption: d.caption,
-            hashtags: d.hashtags || [],
-            tags: d.tags || [],
-            image: makeImageUrl(d.imagePrompt, Date.now()),
-            imagePrompt: d.imagePrompt || "",
-            mood: d.mood || "chill",
-            timestamp: Date.now(),
-            likes: likes,
-            userLiked: false,
-            comments: Array.isArray(d.comments) ? d.comments.slice(0, 10).map(c => ({
-                username: (c.username || "").replace(/^@/, "") || "user_" + Math.floor(Math.random() * 999),
-                text: c.text || "",
-                npcId: c.npcId || null,
-                timestamp: Date.now(),
-            })).filter(c => c.text && c.username !== userName) : [],
-            userComments: [],
-        };
-        data.posts.push(post);
-        data.unreadCount++;
-        npc.currentMood = d.mood || npc.currentMood;
-        npc.lastPostAt = Date.now();
-        bumpLlmCallCounter("single-post");
-        save();
-        flashIcon();
-        if (isPanelOpen() && getGlobal().currentTab === "feed") renderCurrentTab();
-        log(`💰 1 call = ${npc.name} post + ${post.comments.length} comments`);
-        return post;
-    } catch (e) {
-        log("Post gen failed: " + e.message, true);
-        return null;
-    }
+// 🆕 Token config — ทุก mode = 1 call = $5 ต่างกันแค่ content ที่อัด
+function getTokenConfig() {
+    const mode = (getGlobal().tokenMode) || "heavy";
+    if (mode === "light")  return { multiMin:1, multiMax:2, gossip:false, comments:"3-5", caption:"3-5 sentences" };
+    if (mode === "medium") return { multiMin:2, multiMax:3, gossip:true,  comments:"5-7", caption:"4-6 sentences" };
+    return                        { multiMin:3, multiMax:4, gossip:true,  comments:"6-9", caption:"5-8 sentences" }; // heavy (default)
 }
 
-// 🆕 Multi-NPC Smart Batch Post Generation
-// One LLM call → posts for 2-4 different characters reacting to the same scene
-// Maximizes token usage per API call & makes feed feel alive with multiple voices
-// 🆕 v0.12 MEGA BATCH — รวม posts + cross-comments + gossip ใน 1 LLM call เดียว
-// 1 call = $5 ดังนั้น "อัด" content ให้เยอะที่สุดต่อ call
-async function generateMegaBatch(sceneContext, options) {
-    options = options || {};
+// 🆕 MEGA BATCH — posts + comments + gossip ใน 1 call เดียว
+async function generateMegaBatch(sceneContext) {
     const data = getCharData();
-    if (!data || data.npcs.length === 0) return { posts: [], gossip: null };
-
+    if (!data || data.npcs.length === 0) return [];
+    const g = getGlobal();
     const cfg = getTokenConfig();
-    const minPosts = options.min || cfg.multiMin;
-    const maxPosts = options.max || cfg.multiMax;
-    const includeGossip = options.gossip !== false && cfg.gossipChance > 0 && data.npcs.length >= 2;
-
     const card = getCharacterCard();
-    const sceneText = sceneContext ? sceneContext.slice(0, 1500) : "(general slice-of-life)";
-    const recentChat = getRecentChat(20);
-
-    const candidates = data.npcs.slice(0, 12);
-    const roster = candidates.map(n => {
-        const role = n.role ? `[${n.role}]` : "";
-        const desc = (n.description || n.bio || "").slice(0, 200);
-        return `id=${n.id}|name=${n.name}|user=${n.username}${role ? "|" + role : ""}\n  └ ${desc}`;
-    }).join("\n");
-
     const userName = getUserName();
-    const gossipBlock = includeGossip ? `
+    const sceneText = (sceneContext || "").slice(0, 1500) || "(slice-of-life)";
+    const recentChat = getRecentChat(15);
+    const candidates = data.npcs.slice(0, 10);
+    const roster = candidates.map(n =>
+        `id=${n.id}|name=${n.name}|user=${n.username}|role=${n.role||"?"}|bio=${(n.description||n.bio||"").slice(0,150)}`
+    ).join("\n");
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-3️⃣ NPC↔NPC PRIVATE GOSSIP DM (BONUS — also in same response!)
-   Pick 2 characters from roster who would secretly DM each other about this scene.
-   Generate 5-8 messages alternating between them.
-   Each message: Thai, short (3-15 words), in character with their EXACT pronouns/slang.
-   They might gossip about ${userName} or ${card ? card.name : "the protagonist"}.
-   Make it FEEL like real private gossip.
+    const gossipFmt = cfg.gossip ? `,"gossip":{"npcIdA":"id","npcIdB":"id","messages":[{"speakerId":"id","text":"thai"}]}` : "";
+    const gossipRule = cfg.gossip ? `
+3️⃣ BONUS GOSSIP DM: Pick 2 NPCs, generate 5-7 private messages alternating between them.
+   Each message must have "speakerId" = the EXACT npcId of the speaker (not "A"/"B", not a name).` : "";
 
-   ⚠️ CRITICAL FORMAT RULE:
-   - Pick 2 NPCs and put their IDs in "npcIdA" and "npcIdB" fields
-   - In each message, "speakerId" MUST be the EXACT id (e.g. "id_abc123") of who's speaking
-   - Use "speakerId" matching either npcIdA or npcIdB — alternate them naturally
-   - DO NOT use "A"/"B" or character names as speakerId — only the actual id` : "";
-
-    const gossipField = includeGossip ? `,"gossip":{"npcIdA":"id_xxx","npcIdB":"id_yyy","messages":[{"speakerId":"id_xxx","text":"thai"},{"speakerId":"id_yyy","text":"thai"}]}` : "";
-
-    const prompt = `[MEGA BATCH — Maximum content per LLM call]
-
-📖 Story scene that just happened:
-${sceneText}
-
-💬 Recent conversation context:
-${recentChat.slice(-1500)}
-
-🎭 Available characters in this story:
+    const prompt = `[MEGA BATCH — 1 LLM call = all content]
+Scene: ${sceneText}
+Recent chat: ${recentChat.slice(-800)}
+Protagonist: ${card ? card.name : "?"} | User: ${userName}
+NPCs:
 ${roster}
 
-Main protagonist: ${card ? card.name : "?"}
-User/player: ${userName}
+1️⃣ Pick ${cfg.multiMin}-${cfg.multiMax} NPCs most relevant to scene. For each:
+   - Thai caption: ${cfg.caption}, exact pronouns/slang, reference scene
+   - 6-10 hashtags, English image prompt (15-20 words, anime style, NO real people)
+   - Mood: happy/sad/flirty/chill/excited/moody/proud/jealous/lonely/mischievous/thoughtful/tired/hyped/angry/soft
+2️⃣ ${cfg.comments} comments per post (mix: other NPCs in-character + anonymous followers, Thai, no "${userName}")${gossipRule}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 GOAL: Generate as much rich content as possible in this ONE response.
-
-1️⃣ INSTAGRAM POSTS — Pick ${minPosts}-${maxPosts} characters MOST relevant to this scene.
-   For each picked character, generate:
-   - Thai caption: ${cfg.captionLen}, EXACT pronouns/slang, reference scene specifically, 2-4 emojis
-   - Hashtags: 6-10 (mixed Thai/English)
-   - Image prompt: 15-25 English words, anime art scene composition (NO real people)
-   - Mood: pick ONE: happy/sad/flirty/chill/excited/moody/proud/jealous/lonely/mischievous/thoughtful/tired/hyped/angry/soft
-   - Tags: array of @usernames they tagged (must be from roster)
-
-2️⃣ COMMENTS for each post — generate ${cfg.commentCount} comments per post:
-   - Mix: NPCs from roster (use @username, react IN CHARACTER) + anonymous followers (made-up handles)
-   - Each comment: Thai, 3-15 words, natural IG style
-   - Variety: friends roast, crushes flirt, family nag, strangers fan
-   - NEVER from "${userName}" (the user)${gossipBlock}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Respond ONLY with minified JSON (no markdown):
-{"posts":[{"npcId":"id","caption":"thai","imagePrompt":"english","hashtags":["#a"],"mood":"chill","tags":["@u"],"comments":[{"username":"name","text":"thai","npcId":"id_or_null"}]}]${gossipField}}`;
+JSON only: {"posts":[{"npcId":"id","caption":"thai","imagePrompt":"english","hashtags":["#a"],"mood":"chill","comments":[{"username":"u","text":"thai","npcId":"id_or_null"}]}]${gossipFmt}}`;
 
     try {
-        const systemPrompt = `You are a multi-character Instagram simulator. Pack as much in-character, scene-relevant content as possible into one response. Each character MUST sound distinct (different pronouns, slang, energy). Output valid minified JSON only.`;
-        const response = await callLLM(prompt, systemPrompt);
+        const response = await callLLM(prompt, "Multi-character Instagram simulator. Output valid minified JSON only.");
         const parsed = parseJson(response);
-        if (!parsed) { log("Mega batch JSON invalid", true); return { posts: [], gossip: null }; }
-
+        if (!parsed) return [];
         const postsArr = Array.isArray(parsed.posts) ? parsed.posts : (Array.isArray(parsed) ? parsed : []);
-        if (postsArr.length === 0) { log("Mega batch: no posts in response", true); return { posts: [], gossip: null }; }
-
         const created = [];
-        for (const item of postsArr.slice(0, maxPosts)) {
-            const npc = findNpc(item.npcId) || candidates.find(n => n.name === item.name || n.username === item.username);
+        for (const item of postsArr.slice(0, cfg.multiMax)) {
+            const npc = findNpc(item.npcId) || candidates.find(n => n.name === item.name);
             if (!npc || !item.caption) continue;
-            const likes = Math.max(8, Math.floor((npc.followers || 1000) * (0.3 + Math.random() * 1.6) / 10));
             const post = {
-                id: uid("p"),
-                authorId: npc.id,
-                author: npc.name,
-                authorUsername: npc.username,
-                authorAvatar: npc.avatar,
-                caption: item.caption,
-                hashtags: item.hashtags || [],
-                tags: item.tags || [],
+                id: uid("p"), authorId: npc.id, author: npc.name, authorUsername: npc.username,
+                authorAvatar: npc.avatar, caption: item.caption, hashtags: item.hashtags || [],
                 image: makeImageUrl(item.imagePrompt, Date.now() + created.length),
-                imagePrompt: item.imagePrompt || "",
-                mood: item.mood || "chill",
-                timestamp: Date.now() - (created.length * 1000),
-                likes: likes,
-                userLiked: false,
-                comments: [],
-                userComments: [],
+                imagePrompt: item.imagePrompt || "", mood: item.mood || "chill",
+                timestamp: Date.now() - created.length * 1000,
+                likes: Math.max(8, Math.floor((npc.followers || 1000) * (0.4 + Math.random() * 1.4) / 10)),
+                userLiked: false, comments: [], userComments: [],
             };
-            // 🆕 Comments came in same response (no extra LLM call!)
             if (Array.isArray(item.comments)) {
                 post.comments = item.comments.slice(0, 10).map(c => ({
-                    username: (c.username || "").replace(/^@/, "") || "user_" + Math.floor(Math.random() * 999),
-                    text: c.text || "",
-                    npcId: c.npcId || null,
-                    timestamp: Date.now(),
+                    username: (c.username || "").replace(/^@/, "") || "user" + Math.floor(Math.random()*999),
+                    text: c.text || "", npcId: c.npcId || null, timestamp: Date.now(),
                 })).filter(c => c.text && c.username !== userName);
             }
             data.posts.push(post);
@@ -891,156 +614,102 @@ Respond ONLY with minified JSON (no markdown):
             data.unreadCount++;
             created.push(post);
         }
-
-        // 🆕 v0.13: Robust gossip parser — handles speakerId, from, name, username, or A/B
-        let gossipResult = null;
-        if (includeGossip && parsed.gossip && Array.isArray(parsed.gossip.messages)) {
-            const npcA = findNpc(parsed.gossip.npcIdA) || data.npcs[0];
-            const npcB = findNpc(parsed.gossip.npcIdB) || data.npcs[1];
-            if (npcA && npcB && npcA.id !== npcB.id) {
+        // gossip
+        if (cfg.gossip && parsed.gossip && Array.isArray(parsed.gossip.messages)) {
+            const nA = findNpc(parsed.gossip.npcIdA) || data.npcs[0];
+            const nB = findNpc(parsed.gossip.npcIdB) || data.npcs[1];
+            if (nA && nB && nA.id !== nB.id) {
                 if (!data.npcDms) data.npcDms = {};
-                const pairKey = [npcA.id, npcB.id].sort().join("__");
-                data.npcDms[pairKey] = data.npcDms[pairKey] || { participants: [npcA.id, npcB.id], messages: [] };
-                const baseTs = Date.now();
-
-                // 🆕 Smart speaker resolver — tries multiple LLM output formats
-                const resolveSpeaker = (m, idx) => {
-                    const raw = (m.speakerId || m.from || m.author || m.npcId || "").toString().trim();
-                    if (!raw) {
-                        // No speaker info at all — fallback to alternation (A first, B second, ...)
-                        return idx % 2 === 0 ? npcA : npcB;
-                    }
-                    // Match by id (most reliable)
-                    if (raw === npcA.id) return npcA;
-                    if (raw === npcB.id) return npcB;
-                    // Match by literal A/B
-                    const upper = raw.toUpperCase();
-                    if (upper === "A" || upper === "NPCA" || upper === "NPC_A") return npcA;
-                    if (upper === "B" || upper === "NPCB" || upper === "NPC_B") return npcB;
-                    // Match by username (with or without @)
-                    const cleanRaw = raw.replace(/^@/, "").toLowerCase();
-                    if (cleanRaw === (npcA.username || "").toLowerCase()) return npcA;
-                    if (cleanRaw === (npcB.username || "").toLowerCase()) return npcB;
-                    // Match by name / displayName (loose contains)
-                    const aNames = [npcA.name, npcA.displayName].filter(Boolean).map(s => s.toLowerCase());
-                    const bNames = [npcB.name, npcB.displayName].filter(Boolean).map(s => s.toLowerCase());
-                    const rawLower = raw.toLowerCase();
-                    if (aNames.some(n => rawLower === n || rawLower.includes(n) || n.includes(rawLower))) return npcA;
-                    if (bNames.some(n => rawLower === n || rawLower.includes(n) || n.includes(rawLower))) return npcB;
-                    // Last resort: alternate
-                    return idx % 2 === 0 ? npcA : npcB;
-                };
-
-                for (let i = 0; i < parsed.gossip.messages.length; i++) {
-                    const m = parsed.gossip.messages[i];
-                    if (!m.text) continue;
-                    const fromNpc = resolveSpeaker(m, i);
-                    data.npcDms[pairKey].messages.push({
-                        npcId: fromNpc.id,
-                        authorName: fromNpc.displayName || fromNpc.name,
-                        text: m.text,
-                        timestamp: baseTs + i * 1000,
-                    });
-                }
-                gossipResult = { participants: [npcA.id, npcB.id], count: parsed.gossip.messages.length };
-            }
-        }
-
-        // 🆕 Track LLM cost
-        bumpLlmCallCounter("mega-batch");
-        save();
-        flashIcon();
-        if (isPanelOpen() && getGlobal().currentTab === "feed") renderCurrentTab();
-        log(`💰 1 call = ${created.length} posts + ${created.reduce((s, p) => s + (p.comments?.length || 0), 0)} comments${gossipResult ? ` + ${gossipResult.count}-msg gossip` : ""}`);
-        return { posts: created, gossip: gossipResult };
-    } catch (e) {
-        log("Mega batch failed: " + e.message, true);
-        return { posts: [], gossip: null };
-    }
-}
-
-// 💰 LLM call counter — track $5/call cost so user can see spending
-function bumpLlmCallCounter(tag) {
-    const g = getGlobal();
-    if (!g.llmStats) g.llmStats = { totalCalls: 0, sessionCalls: 0, sessionStart: Date.now(), lastTag: "" };
-    g.llmStats.totalCalls++;
-    g.llmStats.sessionCalls++;
-    g.llmStats.lastTag = tag || "";
-    g.llmStats.lastCallAt = Date.now();
-    save();
-}
-
-function resetSessionCounter() {
-    const g = getGlobal();
-    if (!g.llmStats) g.llmStats = { totalCalls: 0, sessionCalls: 0, sessionStart: Date.now(), lastTag: "" };
-    g.llmStats.sessionCalls = 0;
-    g.llmStats.sessionStart = Date.now();
-    save();
-}
-    const data = getCharData();
-    if (!data || posts.length === 0) return;
-    const userName = getUserName();
-    const allNpcs = data.npcs;
-
-    const postsBlock = posts.map((p, i) => {
-        const author = findNpc(p.authorId);
-        return `[Post #${i}] by @${p.authorUsername} (${author ? author.role || "?" : "?"}, mood: ${p.mood}):
-"${(p.caption || "").slice(0, 200)}"`;
-    }).join("\n\n");
-
-    const npcsBlock = allNpcs.map(n =>
-        `@${n.username} (${n.name}${n.role ? ", " + n.role : ""}): ${(n.description || "").slice(0, 100)}`
-    ).join("\n");
-
-    const prompt = `[Cross-NPC Instagram Comments]
-
-Posts:
-${postsBlock}
-
-Available characters who could comment:
-${npcsBlock}
-
-User's name: ${userName} (DO NOT use as commenter)
-
-Task: For each post, generate 4-7 comments. Mix:
-- Other NPCs from the roster (use their @username) — they should react IN CHARACTER
-- Random anonymous followers (made-up usernames)
-- Sometimes reply-to-comment chains feel real
-
-Each comment in Thai, short (3-15 words), natural IG style:
-- Friends roast each other
-- Crushes flirt subtly
-- Family members nag/care
-- Strangers heart-eyes / sus / ask questions
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Respond ONLY with minified JSON:
-[{"postIndex":0,"comments":[{"username":"name_or_@user","text":"thai","npcId":"id_xxx_if_known"}]}]`;
-
-    try {
-        const response = await callLLM(prompt, "Generate IG comments. JSON array only.");
-        const arr = parseJson(response);
-        if (!Array.isArray(arr)) return;
-        for (const block of arr) {
-            const post = posts[block.postIndex];
-            if (!post || !Array.isArray(block.comments)) continue;
-            for (const c of block.comments.slice(0, 8)) {
-                if (!c.text) continue;
-                if (c.username === userName) continue;
-                post.comments.push({
-                    username: (c.username || "").replace(/^@/, "") || "user_" + Math.floor(Math.random() * 999),
-                    text: c.text,
-                    npcId: c.npcId || null,
-                    timestamp: Date.now(),
+                const key = [nA.id, nB.id].sort().join("__");
+                data.npcDms[key] = data.npcDms[key] || { participants:[nA.id, nB.id], messages:[] };
+                parsed.gossip.messages.forEach((m, i) => {
+                    if (!m.text) return;
+                    const raw = String(m.speakerId || m.from || "").trim();
+                    let speaker = raw === nA.id ? nA : raw === nB.id ? nB : i % 2 === 0 ? nA : nB;
+                    const aNames = [nA.name, nA.displayName||""].map(s=>s.toLowerCase());
+                    const bNames = [nB.name, nB.displayName||""].map(s=>s.toLowerCase());
+                    if (!raw || raw === nA.id || aNames.includes(raw.toLowerCase())) speaker = nA;
+                    else if (raw === nB.id || bNames.includes(raw.toLowerCase())) speaker = nB;
+                    data.npcDms[key].messages.push({ npcId: speaker.id, authorName: speaker.displayName || speaker.name, text: m.text, timestamp: Date.now() + i * 1000 });
                 });
+                log(`👀 Gossip: ${nA.name} ↔ ${nB.name}`);
             }
         }
-    } catch (e) { log("crossComments: " + e.message, true); }
+        save(); flashIcon();
+        if (isPanelOpen() && getGlobal().currentTab === "feed") renderCurrentTab();
+        log(`💰 1 call = ${created.length} posts + ${created.reduce((s,p)=>s+(p.comments.length||0),0)} comments`);
+        return created;
+    } catch (e) { log("Mega batch failed: " + e.message, true); return []; }
 }
 
-// ⚠️ generateComments() removed in v0.12 — comments now bundled in same call as the post (saves $5 per call)
+// Single-NPC fallback (1 call with inline comments)
+async function generatePostFor(npc, sceneContext) {
+    const data = getCharData();
+    if (!data || !npc) return null;
+    const charCtx = buildCharContext(npc);
+    const sceneText = sceneContext ? sceneContext.slice(0, 1000) : "(slice-of-life)";
+    const prompt = `[Instagram Post + Comments — 1 call]
+${charCtx}
+Scene: ${sceneText}
 
+Generate in ONE response:
+1) Thai caption 4-6 sentences, exact pronouns/slang, reference scene. 6-10 hashtags. English image prompt 15-20 words anime style.
+2) 5-7 comments (mix NPCs + anon, Thai, never from "${getUserName()}")
 
+JSON: {"caption":"thai","imagePrompt":"english","hashtags":["#a"],"mood":"chill","comments":[{"username":"u","text":"thai"}]}`;
+    try {
+        const response = await callLLM(prompt, "Output valid JSON only.");
+        const d = parseJson(response);
+        if (!d || !d.caption) return null;
+        const post = {
+            id: uid("p"), authorId: npc.id, author: npc.name, authorUsername: npc.username,
+            authorAvatar: npc.avatar, caption: d.caption, hashtags: d.hashtags || [],
+            image: makeImageUrl(d.imagePrompt, Date.now()), imagePrompt: d.imagePrompt || "",
+            mood: d.mood || "chill", timestamp: Date.now(),
+            likes: Math.max(8, Math.floor((npc.followers||1000) * (0.4+Math.random()*1.4) / 10)),
+            userLiked: false, comments: Array.isArray(d.comments) ? d.comments.slice(0,8).map(c=>({ username:(c.username||"").replace(/^@/,"")||"user"+Math.floor(Math.random()*999), text:c.text||"", npcId:null, timestamp:Date.now() })).filter(c=>c.text) : [],
+            userComments: [],
+        };
+        data.posts.push(post);
+        data.unreadCount++;
+        npc.currentMood = d.mood || npc.currentMood;
+        npc.lastPostAt = Date.now();
+        save(); flashIcon();
+        if (isPanelOpen() && getGlobal().currentTab === "feed") renderCurrentTab();
+        log(npc.name + " posted ✓");
+        return post;
+    } catch (e) { log("Post failed: " + e.message, true); return null; }
+}
+
+async function generateComments(npc, post, sceneContext) {
+    const userName = getUserName();
+    const data = getCharData();
+    const otherNpcs = data.npcs.filter(n => n.id !== npc.id).map(n => n.name).join(", ");
+    const prompt = `[IG Comments]
+${npc.name} posted: "${post.caption}" (mood: ${post.mood})
+Scene context: ${sceneContext ? sceneContext.slice(0, 300) : "(none)"}
+Other NPCs in this story: ${otherNpcs || "(none)"}
+User's name: ${userName}
+
+Generate 2-4 Thai IG comments. Mix of:
+- Known NPCs (use their actual names for username if relevant)
+- Random followers
+- NEVER from "${userName}" or "${npc.name}"
+
+Keep comments short, natural Thai IG style.
+
+Respond ONLY with JSON array: [{"username":"name","text":"thai"}]`;
+    try {
+        const response = await callLLM(prompt);
+        const arr = parseJson(response);
+        if (!Array.isArray(arr)) return [];
+        return arr.slice(0, 5).map(c => ({
+            username: c.username || "user_" + Math.floor(Math.random() * 999),
+            text: c.text || "",
+            timestamp: Date.now(),
+        }));
+    } catch (e) { return []; }
+}
 
 async function generateReactionToUser(npc, userPost) {
     const charCtx = buildCharContext(npc);
@@ -1131,12 +800,9 @@ const SHADOW_CSS = `
     display: flex; align-items: center; justify-content: center; border: 2px solid #000; }
 .badge.hidden { display: none; }
 
-.overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-    width: 100vw; height: 100vh; height: 100dvh; /* dvh fixes mobile address-bar bug */
+.overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100vh;
     background: #000; pointer-events: auto; display: flex; flex-direction: column;
-    color: #f5f5f5; animation: insta-fade 0.2s ease-out; overflow: hidden;
-    padding-top: env(safe-area-inset-top, 0px);
-    padding-bottom: env(safe-area-inset-bottom, 0px); }
+    color: #f5f5f5; animation: insta-fade 0.2s ease-out; overflow: hidden; }
 .overlay.hidden { display: none; }
 @keyframes insta-fade { from { opacity: 0; } to { opacity: 1; } }
 
@@ -1150,9 +816,6 @@ const SHADOW_CSS = `
 .screen { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; min-height: 0; -webkit-overflow-scrolling: touch; }
 .screen::-webkit-scrollbar { width: 6px; }
 .screen::-webkit-scrollbar-thumb { background: #262626; border-radius: 3px; }
-/* 🆕 DM mode — disable outer scroll, let dm-thread scroll instead, input sticks to bottom */
-.screen.dm-mode { overflow: hidden; display: flex; flex-direction: column; }
-.screen.dm-mode > div { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 .nav { display: flex; justify-content: space-around; align-items: center; border-top: 1px solid #262626; padding: 8px 0 10px; background: #000; flex-shrink: 0; height: 52px; box-sizing: border-box; }
 .nav-item { background: transparent; border: none; color: #f5f5f5; cursor: pointer; padding: 6px 12px; opacity: 0.7; }
@@ -1254,96 +917,27 @@ const SHADOW_CSS = `
 
 .dm-header { padding: 14px; display: flex; justify-content: space-between; align-items: center; }
 .dm-title { font-size: 18px; font-weight: 700; }
-.dm-section-tab { display: flex; gap: 4px; padding: 0 14px 8px; border-bottom: 1px solid #262626; }
-.dm-tab-btn { flex: 1; padding: 8px 4px; background: transparent; color: #a8a8a8; border: none; border-bottom: 2px solid transparent; cursor: pointer; font-size: 13px; font-weight: 600; }
-.dm-tab-btn.active { color: #f5f5f5; border-bottom-color: #0095f6; }
 .dm-list { display: flex; flex-direction: column; }
 .dm-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; cursor: pointer; position: relative; }
 .dm-item:hover { background: #121212; }
 .dm-item-del { background: transparent; border: none; color: #737373; cursor: pointer; padding: 4px 8px; font-size: 14px; }
 .dm-item-del:hover { color: #ed4956; }
 .dm-info { flex: 1; min-width: 0; }
-.dm-name { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.dm-name { font-weight: 600; font-size: 14px; }
 .dm-preview { font-size: 13px; color: #a8a8a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dm-peek-pair { display: flex; gap: -8px; align-items: center; }
-.dm-peek-pair img { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #000; }
-.dm-peek-pair img:nth-child(2) { margin-left: -10px; }
-
-/* 🆕 DM full-height layout — input always sticks to bottom */
-.dm-view { display: flex; flex-direction: column; height: 100%; min-height: 100%; }
-.dm-chat-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #262626; flex-shrink: 0; }
+.dm-chat-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #262626; }
 .dm-chat-name { font-weight: 600; font-size: 15px; flex: 1; }
 .dm-clear-btn { background: transparent; border: none; color: #737373; cursor: pointer; font-size: 13px; padding: 4px 8px; }
 .dm-clear-btn:hover { color: #ed4956; }
-.dm-thread { flex: 1 1 auto; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; min-height: 0; -webkit-overflow-scrolling: touch; }
+.dm-thread { padding: 14px; display: flex; flex-direction: column; gap: 6px; min-height: 200px; }
 .dm-msg { max-width: 75%; padding: 8px 12px; border-radius: 18px; font-size: 14px; line-height: 1.35; word-wrap: break-word; position: relative; }
 .dm-msg.user { align-self: flex-end; background: #0095f6; color: white; }
 .dm-msg.char { align-self: flex-start; background: #262626; color: #f5f5f5; }
-.dm-msg.npc-other { align-self: flex-start; background: #1c1c1e; color: #f5f5f5; border: 1px solid #2a2a2a; }
-.dm-msg-author { font-size: 10px; color: #737373; margin-bottom: 2px; font-weight: 600; }
 .dm-msg .msg-del { position: absolute; top: -6px; right: -6px; background: #ed4956; color: white; border: none; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; cursor: pointer; display: none; }
 .dm-msg:hover .msg-del { display: flex; align-items: center; justify-content: center; }
-.dm-input-wrap { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid #262626; flex-shrink: 0; background: #000; }
+.dm-input-wrap { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid #262626; }
 .dm-input-wrap input { flex: 1; padding: 10px 14px; border-radius: 20px; background: #121212; border: 1px solid #262626; color: #f5f5f5; font-size: 14px; outline: none; }
 .dm-input-wrap button { padding: 8px 16px; background: transparent; color: #0095f6; border: none; font-weight: 700; cursor: pointer; font-size: 14px; }
-.dm-peek-banner { padding: 10px 14px; background: linear-gradient(90deg, rgba(220,39,67,0.15), rgba(188,24,136,0.15)); border-bottom: 1px solid #262626; font-size: 12px; color: #ff6b6b; text-align: center; flex-shrink: 0; }
-
-/* 🆕 Mood badges & timeline */
-.mood-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; line-height: 1.4; }
-.mood-happy { background: rgba(255,193,7,0.2); color: #ffc107; }
-.mood-sad { background: rgba(96,125,139,0.2); color: #90a4ae; }
-.mood-flirty { background: rgba(233,30,99,0.2); color: #ec407a; }
-.mood-chill { background: rgba(0,188,212,0.2); color: #4dd0e1; }
-.mood-excited { background: rgba(255,152,0,0.2); color: #ffa726; }
-.mood-moody { background: rgba(156,39,176,0.2); color: #ba68c8; }
-.mood-proud { background: rgba(76,175,80,0.2); color: #66bb6a; }
-.mood-jealous { background: rgba(124,77,255,0.2); color: #9575cd; }
-.mood-lonely { background: rgba(63,81,181,0.2); color: #7986cb; }
-.mood-mischievous { background: rgba(255,87,34,0.2); color: #ff8a65; }
-.mood-thoughtful { background: rgba(96,125,139,0.2); color: #b0bec5; }
-.mood-tired { background: rgba(120,120,120,0.2); color: #9e9e9e; }
-.mood-hyped { background: rgba(244,67,54,0.2); color: #ef5350; }
-.mood-angry { background: rgba(229,57,53,0.25); color: #ef5350; }
-.mood-soft { background: rgba(255,182,193,0.25); color: #f48fb1; }
-
-.smart-post-btn { padding: 10px; background: linear-gradient(45deg, #f09433, #dc2743, #bc1888); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 13px; }
-.smart-post-btn:disabled { opacity: 0.5; cursor: wait; }
-
-.tag-chip { color: #0095f6; font-weight: 600; }
-.cross-comment-link { color: #0095f6; cursor: pointer; }
-
-/* 🆕 In-app Settings — Art Style picker */
-.art-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.art-card { position: relative; background: #121212; border: 2px solid #262626; border-radius: 10px; overflow: hidden; cursor: pointer; transition: all 0.2s; }
-.art-card:hover { border-color: #3a3a3a; transform: translateY(-1px); }
-.art-card.active { border-color: #0095f6; box-shadow: 0 0 0 2px rgba(0,149,246,0.3); }
-.art-preview { width: 100%; aspect-ratio: 1/1; background: #0a0a0a; overflow: hidden; }
-.art-preview img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity 0.4s; }
-.art-info { padding: 8px 10px; }
-.art-name { font-size: 12px; font-weight: 700; color: #f5f5f5; line-height: 1.3; }
-.art-desc { font-size: 10px; color: #a8a8a8; margin-top: 2px; line-height: 1.3; }
-.art-active-badge { position: absolute; top: 6px; right: 6px; background: #0095f6; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
-
-/* 🆕 Token Mode picker */
-.token-grid { display: flex; flex-direction: column; gap: 6px; }
-.token-card { background: #121212; border: 2px solid #262626; border-radius: 10px; padding: 10px 12px; cursor: pointer; transition: all 0.2s; }
-.token-card:hover { border-color: #3a3a3a; }
-.token-card.active { border-color: #dc2743; background: linear-gradient(90deg, rgba(220,39,67,0.08), rgba(188,24,136,0.05)); }
-.token-label { font-size: 14px; font-weight: 700; color: #f5f5f5; }
-.token-hint { font-size: 11px; color: #a8a8a8; margin-top: 3px; line-height: 1.4; }
-.token-calls { font-size: 10px; color: #0095f6; margin-top: 3px; font-weight: 600; }
-
-/* 🆕 In-app toggle switch */
-.settings-toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; gap: 10px; border-bottom: 1px solid #1a1a1a; }
-.settings-toggle-row:last-child { border-bottom: none; }
-.ic-switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
-.ic-switch input { opacity: 0; width: 0; height: 0; }
-.ic-switch span { position: absolute; cursor: pointer; inset: 0; background: #3a3a3a; border-radius: 22px; transition: 0.25s; }
-.ic-switch span:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.25s; }
-.ic-switch input:checked + span { background: linear-gradient(45deg, #f09433, #dc2743, #bc1888); }
-.ic-switch input:checked + span:before { transform: translateX(18px); }
-.ic-switch input[type="range"] { accent-color: #0095f6; }
-input[type="range"] { accent-color: #0095f6; }
 
 .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(30px);
     background: #262626; color: #f5f5f5; padding: 10px 20px; border-radius: 24px; font-size: 14px;
@@ -1369,7 +963,7 @@ input[type="range"] { accent-color: #0095f6; }
     background: #111;
     border-radius: 16px;
     padding: 20px;
-    width: min(440px, 94vw);
+    width: min(400px, 92vw);
     border: 1px solid #262626;
     flex-shrink: 0;
     margin: 0 0 auto 0;
@@ -1475,21 +1069,9 @@ function mountUI() {
 }
 
 function setFloaterVisible(v) {
-    // shadow icon
-    try {
-        if (shadowRoot) {
-            const el = shadowRoot.getElementById("floater");
-            if (el) { if (v) el.classList.remove("hidden"); else el.classList.add("hidden"); }
-        }
-    } catch (e) {}
-    // body icon — primary
-    const bodyIcon = document.getElementById("instachar-body-icon");
-    if (v) {
-        if (!bodyIcon) ensureBodyIcon();
-        else bodyIcon.style.display = "flex";
-    } else {
-        if (bodyIcon) bodyIcon.style.display = "none";
-    }
+    if (!shadowRoot) return;
+    const el = shadowRoot.getElementById("floater");
+    if (el) { if (v) el.classList.remove("hidden"); else el.classList.add("hidden"); }
 }
 
 function flashIcon() {
@@ -1503,188 +1085,14 @@ function flashIcon() {
 }
 
 function findIcon() {
-    // body icon
-    const bodyIcon = document.getElementById("instachar-body-icon");
-    if (bodyIcon) {
-        const orig = bodyIcon.style.background;
-        bodyIcon.style.background = "red";
-        bodyIcon.style.transform = "scale(1.5)";
-        setTimeout(() => {
-            bodyIcon.style.background = orig;
-            bodyIcon.style.transform = "";
-        }, 3000);
-    } else {
-        // No icon at all — try rescue
-        ensureBodyIcon();
-        toast("✓ สร้าง icon ใหม่แล้ว");
-    }
-    // shadow flash too
-    try {
-        if (shadowRoot) {
-            const el = shadowRoot.getElementById("floater");
-            if (el) {
-                el.classList.add("flash");
-                setTimeout(() => el.classList.remove("flash"), 3000);
-            }
-        }
-    } catch (e) {}
+    if (!shadowRoot) return;
+    const el = shadowRoot.getElementById("floater");
+    if (!el) return;
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 3000);
 }
 
-function resetIconPos() { getGlobal().iconPos = null; save(); mountUI(); ensureBodyIcon(); toast("รีเซ็ตตำแหน่งแล้ว"); }
-
-// 🆕 v0.13.1 — BULLETPROOF Body Icon
-// Lives directly in document.body (not Shadow DOM), so it shows even if Shadow DOM fails.
-// Works as primary icon; calls openPanel() which still uses Shadow DOM for the IG overlay.
-// If Shadow DOM is broken, openPanel will rebuild it on demand.
-function ensureBodyIcon() {
-    try {
-        // remove any old version
-        const old = document.getElementById("instachar-body-icon");
-        if (old) old.remove();
-
-        const g = getGlobal();
-        if (g.iconVisible === false) return; // user explicitly hid it
-
-        const btn = document.createElement("button");
-        btn.id = "instachar-body-icon";
-        btn.title = "InstaChar";
-        btn.innerHTML = "📱";
-
-        // Inline styles — robust against host CSS overrides
-        const pos = g.iconPos || { right: 16, top: 150 };
-        const css = {
-            position: "fixed",
-            right: (typeof pos.right === "number" ? pos.right : 16) + "px",
-            top: (typeof pos.top === "number" ? pos.top : 150) + "px",
-            width: "58px",
-            height: "58px",
-            borderRadius: "18px",
-            background: "linear-gradient(135deg,#667eea 0%,#764ba2 50%,#f093fb 100%)",
-            border: "none",
-            boxShadow: "0 15px 35px rgba(102,126,234,0.4),0 5px 15px rgba(118,75,162,0.3),0 0 0 2px rgba(255,255,255,0.15)",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "white",
-            fontSize: "30px",
-            zIndex: "2147483647",
-            userSelect: "none",
-            webkitTapHighlightColor: "transparent",
-            touchAction: "none",
-            padding: "0",
-        };
-        Object.assign(btn.style, css);
-
-        // Badge for unread
-        const badge = document.createElement("span");
-        badge.id = "instachar-body-badge";
-        Object.assign(badge.style, {
-            position: "absolute",
-            top: "-6px",
-            right: "-6px",
-            minWidth: "20px",
-            height: "20px",
-            padding: "0 6px",
-            background: "#ff2d55",
-            color: "white",
-            fontSize: "11px",
-            fontWeight: "700",
-            borderRadius: "10px",
-            display: "none",
-            alignItems: "center",
-            justifyContent: "center",
-            border: "2px solid #000",
-        });
-        badge.textContent = "0";
-        btn.appendChild(badge);
-
-        // Drag-to-move logic
-        let pDown = false, pStartX = 0, pStartY = 0, pMoved = false;
-        btn.addEventListener("pointerdown", (e) => {
-            pDown = true; pStartX = e.clientX; pStartY = e.clientY; pMoved = false;
-            btn.style.transform = "scale(0.92)";
-            try { btn.setPointerCapture(e.pointerId); } catch (_) {}
-        });
-        btn.addEventListener("pointermove", (e) => {
-            if (!pDown) return;
-            const dx = e.clientX - pStartX, dy = e.clientY - pStartY;
-            if (Math.abs(dx) > 6 || Math.abs(dy) > 6) pMoved = true;
-            if (pMoved) {
-                const newRight = window.innerWidth - e.clientX - 29;
-                const newTop = e.clientY - 29;
-                btn.style.right = Math.max(0, Math.min(window.innerWidth - 58, newRight)) + "px";
-                btn.style.top = Math.max(0, Math.min(window.innerHeight - 58, newTop)) + "px";
-                btn.style.bottom = "auto";
-            }
-        });
-        btn.addEventListener("pointerup", (e) => {
-            pDown = false;
-            btn.style.transform = "";
-            if (pMoved) {
-                const r = btn.getBoundingClientRect();
-                getGlobal().iconPos = {
-                    right: Math.round(window.innerWidth - r.right),
-                    top: Math.round(r.top),
-                };
-                save();
-            } else {
-                openPanelSafe();
-            }
-        });
-        btn.addEventListener("pointercancel", () => { pDown = false; btn.style.transform = ""; });
-
-        document.body.appendChild(btn);
-        log("✓ Body icon mounted directly to <body>");
-    } catch (e) {
-        log("ensureBodyIcon failed: " + e.message, true);
-        console.error("[InstaChar] ensureBodyIcon failed:", e);
-    }
-}
-
-// Update badge on body icon (in addition to shadow icon)
-function updateBodyBadge() {
-    try {
-        const data = getCharData();
-        const b = document.getElementById("instachar-body-badge");
-        if (!b) return;
-        const n = (data && data.unreadCount) || 0;
-        if (n > 0) { b.textContent = n > 99 ? "99+" : String(n); b.style.display = "flex"; }
-        else { b.style.display = "none"; }
-    } catch (e) {}
-}
-
-// Bulletproof openPanel — rebuilds Shadow DOM if missing
-function openPanelSafe() {
-    try {
-        if (!shadowRoot || !shadowRoot.getElementById("overlay")) {
-            log("⚠️ Shadow not ready — rebuilding...", true);
-            mountUI();
-        }
-        openPanel();
-    } catch (e) {
-        log("openPanelSafe failed: " + e.message, true);
-        alert("InstaChar: เปิดแอปไม่ได้\n\n" + e.message + "\n\nลอง: รีเฟรช SillyTavern (F5)");
-    }
-}
-
-// 🆕 Global rescue function — user can run window.__instaCharRescue() in console
-window.__instaCharRescue = function() {
-    console.log("[InstaChar] Running rescue...");
-    try {
-        const g = getGlobal();
-        g.iconVisible = true;
-        g.iconPos = null;
-        save();
-        ensureBodyIcon();
-        try { mountUI(); } catch (e) { console.error("mountUI:", e); }
-        console.log("[InstaChar] Rescue complete. Icon should now be visible top-right.");
-        return "OK — look top-right of screen";
-    } catch (e) {
-        console.error("[InstaChar] Rescue failed:", e);
-        return "FAILED: " + e.message;
-    }
-};
+function resetIconPos() { getGlobal().iconPos = null; save(); mountUI(); toast("รีเซ็ตตำแหน่งแล้ว"); }
 
 function openPanel() {
     if (!shadowRoot) return;
@@ -1714,20 +1122,13 @@ function updateClock() {
 }
 
 function updateBadge() {
-    // shadow badge
-    try {
-        if (shadowRoot) {
-            const data = getCharData();
-            const n = data ? (data.unreadCount || 0) : 0;
-            const badge = shadowRoot.getElementById("badge");
-            if (badge) {
-                if (n > 0) { badge.textContent = n > 99 ? "99+" : n; badge.classList.remove("hidden"); }
-                else badge.classList.add("hidden");
-            }
-        }
-    } catch (e) {}
-    // body badge (always update, regardless of shadow state)
-    updateBodyBadge();
+    if (!shadowRoot) return;
+    const data = getCharData();
+    const n = data ? (data.unreadCount || 0) : 0;
+    const badge = shadowRoot.getElementById("badge");
+    if (!badge) return;
+    if (n > 0) { badge.textContent = n > 99 ? "99+" : n; badge.classList.remove("hidden"); }
+    else badge.classList.add("hidden");
 }
 
 function updateNavActive() {
@@ -1756,191 +1157,119 @@ function showModal(html) {
 }
 function closeModal() { if (shadowRoot) shadowRoot.getElementById("modal-root").innerHTML = ""; }
 
-// 🆕 In-app Settings panel — opens from gear icon in topbar (v0.12 — cost-aware)
+// 🆕 In-app settings — เปิดจากปุ่ม ⚙ มุมขวาบน
 function openInAppSettings() {
     if (!shadowRoot) return;
     const g = getGlobal();
-    const currentStyle = g.artStyle || "modern";
-    const currentTokenMode = g.tokenMode || "heavy";
-    const stats = g.llmStats || { totalCalls: 0, sessionCalls: 0 };
+    const cur = g.artStyle || "modern";
+    const styleCards = Object.entries(ART_STYLES).map(([k, s]) =>
+        `<div class="art-card ${k === cur ? "active" : ""}" data-style="${k}" style="background:${k===cur?"#1a1a2e":"#121212"};border:2px solid ${k===cur?"#0095f6":"#262626"};border-radius:10px;padding:10px;cursor:pointer;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:700">${s.name}</div>
+            <div style="font-size:11px;color:#a8a8a8">${s.desc}</div>
+        </div>`
+    ).join("");
 
-    const styleCards = Object.entries(ART_STYLES).map(([key, s]) => {
-        const isActive = key === currentStyle;
-        return `<div class="art-card ${isActive ? "active" : ""}" data-style="${key}">
-            <div class="art-preview"><img src="${makePreviewUrl(key)}" loading="lazy" onerror="this.style.opacity=0.3"/></div>
-            <div class="art-info">
-                <div class="art-name">${s.name}</div>
-                <div class="art-desc">${s.desc}</div>
-            </div>
-            ${isActive ? '<div class="art-active-badge">✓</div>' : ""}
-        </div>`;
-    }).join("");
-
-    const tokenModes = [
-        { key: "light", label: "🌱 เบา", hint: "1-2 NPCs โพสต์ + 3-5 comments", note: "เนื้อหาน้อย แต่ยังเป็น $5 เท่ากัน" },
-        { key: "medium", label: "⚡ กลาง", hint: "2-3 NPCs + 5-7 comments + นินทา 40%", note: "สมดุล" },
-        { key: "heavy", label: "🔥 หนัก (คุ้มสุด!)", hint: "3-4 NPCs + 6-9 comments + นินทาเสมอ", note: "อัด content เต็ม $5 ที่จ่าย" },
+    const modes = [
+        { k:"light",  l:"🌱 เบา",           h:"1-2 NPCs + 3-5 comments" },
+        { k:"medium", l:"⚡ กลาง",           h:"2-3 NPCs + 5-7 comments + นินทา 40%" },
+        { k:"heavy",  l:"🔥 หนัก (คุ้มสุด!)", h:"3-4 NPCs + 6-9 comments + นินทาเสมอ" },
     ];
-    const tokenCards = tokenModes.map(tm => {
-        const isActive = tm.key === currentTokenMode;
-        return `<div class="token-card ${isActive ? "active" : ""}" data-token="${tm.key}">
-            <div class="token-label">${tm.label} <span style="float:right;color:#0095f6;font-size:11px">$5/call</span></div>
-            <div class="token-hint">${tm.hint}</div>
-            <div class="token-calls">${tm.note}</div>
-        </div>`;
-    }).join("");
-
-    const sessionCost = (stats.sessionCalls || 0) * 5;
-    const totalCost = (stats.totalCalls || 0) * 5;
+    const modeCards = modes.map(m =>
+        `<div class="mode-card" data-mode="${m.k}" style="background:${(g.tokenMode||"heavy")===m.k?"rgba(220,39,67,0.1)":"#121212"};border:2px solid ${(g.tokenMode||"heavy")===m.k?"#dc2743":"#262626"};border-radius:10px;padding:10px;cursor:pointer;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:700">${m.l} <span style="float:right;color:#0095f6;font-size:11px">$5/call</span></div>
+            <div style="font-size:11px;color:#a8a8a8">${m.h}</div>
+        </div>`
+    ).join("");
 
     showModal(`
-        <h3 style="margin:0 0 4px 0;font-size:20px">⚙️ ตั้งค่า InstaChar</h3>
-        <div style="font-size:11px;color:#737373;margin-bottom:12px">v${VERSION} · ทุก mode = 1 call = $5</div>
-
-        <!-- 💰 Cost Counter -->
-        <div style="background:linear-gradient(135deg,rgba(0,200,100,0.08),rgba(0,149,246,0.06));border:1px solid rgba(0,200,100,0.25);border-radius:10px;padding:12px;margin-bottom:14px">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                <div>
-                    <div style="font-size:11px;color:#a8a8a8">รอบเซสชั่นนี้</div>
-                    <div style="font-size:22px;font-weight:800;color:#00c864">${stats.sessionCalls || 0} calls</div>
-                    <div style="font-size:13px;color:#0095f6;font-weight:700">≈ $${sessionCost}</div>
-                </div>
-                <div style="text-align:right">
-                    <div style="font-size:11px;color:#a8a8a8">ทั้งหมด</div>
-                    <div style="font-size:14px;color:#f5f5f5">${stats.totalCalls || 0} calls (≈ $${totalCost})</div>
-                    <button id="reset-counter" style="margin-top:6px;padding:4px 10px;background:#262626;color:#a8a8a8;border:none;border-radius:6px;cursor:pointer;font-size:11px">รีเซ็ต session</button>
-                </div>
+        <h3 style="margin:0 0 14px">⚙️ ตั้งค่า InstaChar</h3>
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px">🎨 Art Style</div>
+        <div id="style-picker">${styleCards}</div>
+        <div style="font-size:13px;font-weight:700;margin:14px 0 8px">💰 Content per Call ($5 ทุก mode)</div>
+        <div id="mode-picker">${modeCards}</div>
+        <div style="background:#0d0d0d;border-radius:10px;padding:12px;margin:14px 0">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+                <span style="font-size:13px">📸 Auto-post</span>
+                <label style="position:relative;display:inline-block;width:40px;height:22px">
+                    <input type="checkbox" id="set-autopost" ${g.autoPost?"checked":""} style="opacity:0;width:0;height:0">
+                    <span id="set-autopost-slider" style="position:absolute;cursor:pointer;inset:0;background:${g.autoPost?"#dc2743":"#3a3a3a"};border-radius:22px;transition:.25s"></span>
+                    <span id="set-autopost-knob" style="position:absolute;content:'';height:16px;width:16px;left:${g.autoPost?"21px":"3px"};bottom:3px;background:white;border-radius:50%;transition:.25s"></span>
+                </label>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+                <span style="font-size:13px">🎭 Multi-NPC</span>
+                <label style="position:relative;display:inline-block;width:40px;height:22px">
+                    <input type="checkbox" id="set-multinpc" ${g.multiNpc!==false?"checked":""} style="opacity:0;width:0;height:0">
+                    <span id="set-multinpc-slider" style="position:absolute;cursor:pointer;inset:0;background:${g.multiNpc!==false?"#dc2743":"#3a3a3a"};border-radius:22px;transition:.25s"></span>
+                    <span id="set-multinpc-knob" style="position:absolute;content:'';height:16px;width:16px;left:${g.multiNpc!==false?"21px":"3px"};bottom:3px;background:white;border-radius:50%;transition:.25s"></span>
+                </label>
+            </div>
+            <div style="margin-top:8px;font-size:13px">ความถี่: <span id="chance-lbl" style="color:#0095f6">${Math.round(g.postChance*100)}%</span>
+                <input type="range" id="set-chance" min="0" max="100" step="5" value="${Math.round(g.postChance*100)}" style="width:100%;margin-top:4px;accent-color:#0095f6">
             </div>
         </div>
-
-        <!-- 📐 Art Style -->
-        <div style="margin-bottom:18px">
-            <label style="display:block;font-size:13px;font-weight:700;color:#f5f5f5;margin-bottom:8px">🎨 ลายเส้น (Art Style) — 5 แบบให้เลือก</label>
-            <div class="art-grid">${styleCards}</div>
-        </div>
-
-        <!-- 💰 Token Mode -->
-        <div style="margin-bottom:18px">
-            <label style="display:block;font-size:13px;font-weight:700;color:#f5f5f5;margin-bottom:4px">💰 Content per Call</label>
-            <div style="font-size:11px;color:#a8a8a8;margin-bottom:8px">1 call = $5 ทุกระดับ — เลือกให้ "เนื้อหาเยอะที่สุด" จะคุ้มสุด</div>
-            <div class="token-grid">${tokenCards}</div>
-        </div>
-
-        <!-- ⚙ Toggles -->
-        <div style="background:#0d0d0d;border-radius:10px;padding:12px;margin-bottom:14px">
-            <div style="font-size:13px;font-weight:700;margin-bottom:10px">⚙️ Toggles</div>
-
-            <div class="settings-toggle-row">
-                <div>
-                    <div style="font-size:13px">📸 Auto-post (ทุกครั้ง AI ตอบ)</div>
-                    <div style="font-size:11px;color:#737373">ปิด = $0 ตอน RP / กดเอง "Smart Post Now" เมื่อต้องการ</div>
-                </div>
-                <label class="ic-switch"><input type="checkbox" id="setting-autopost" ${g.autoPost ? "checked" : ""}/><span></span></label>
-            </div>
-
-            <div class="settings-toggle-row">
-                <div>
-                    <div style="font-size:13px">🎭 Multi-NPC Mode</div>
-                    <div style="font-size:11px;color:#737373">หลาย NPC โพสต์ใน 1 call เดียว (แนะนำเปิด)</div>
-                </div>
-                <label class="ic-switch"><input type="checkbox" id="setting-multinpc" ${g.multiNpc !== false ? "checked" : ""}/><span></span></label>
-            </div>
-
-            <div class="settings-toggle-row">
-                <div>
-                    <div style="font-size:13px">⏰ Cooldown ${g.cooldownSeconds || 30} วิ</div>
-                    <div style="font-size:11px;color:#737373">กันยิง $5 ติดๆ — ห่างกันอย่างน้อย ${g.cooldownSeconds || 30} วินาที</div>
-                </div>
-                <label class="ic-switch"><input type="checkbox" id="setting-cooldown" ${g.cooldownEnabled !== false ? "checked" : ""}/><span></span></label>
-            </div>
-
-            <div style="margin-top:10px">
-                <label style="font-size:13px">📊 ความถี่ Auto-post: <span id="chance-val" style="color:#0095f6">${Math.round(g.postChance * 100)}%</span></label>
-                <div style="font-size:11px;color:#737373;margin-bottom:4px">เปิด autopost ที่ 30% = AI ตอบ 10 ครั้ง → โพสต์ 3 ครั้ง = $15</div>
-                <input type="range" id="setting-chance" min="0" max="100" step="5" value="${Math.round(g.postChance * 100)}" style="width:100%;margin-top:6px"/>
-            </div>
-        </div>
-
-        <!-- 💡 Tips -->
-        <div style="background:linear-gradient(135deg,rgba(0,149,246,0.1),rgba(220,39,67,0.06));border-radius:10px;padding:12px;margin-bottom:14px;border:1px solid rgba(0,149,246,0.2)">
-            <div style="font-size:12px;color:#0095f6;font-weight:700;margin-bottom:6px">💡 เคล็ดลับประหยัด $$:</div>
-            <div style="font-size:11px;color:#a8a8a8;line-height:1.6">
-                • <b>คุ้มที่สุด:</b> Manual mode (ปิด autopost) + Heavy = กดทีไหร่ก็ได้ content เยอะ<br/>
-                • <b>RP เน้นคุย:</b> Auto-post 20-30% + Light/Medium<br/>
-                • <b>หลีกเลี่ยง:</b> Auto-post 100% + Heavy (จะยิง $5 ทุก message AI ตอบ)<br/>
-                • Cooldown เปิดไว้ ป้องกันกดส่ง 2 ที่ใน 5 วิ = เสีย $10
-            </div>
-        </div>
-
         <div style="display:flex;gap:8px">
-            <button class="secondary-btn" id="settings-close" style="flex:1">ปิด</button>
-            <button class="primary-btn" id="settings-save" style="flex:2;margin:0">💾 บันทึก</button>
+            <button id="set-cancel" style="flex:1;padding:10px;background:#262626;color:#f5f5f5;border:none;border-radius:8px;cursor:pointer">ปิด</button>
+            <button id="set-save" style="flex:2;padding:10px;background:linear-gradient(45deg,#dc2743,#bc1888);color:white;border:none;border-radius:8px;font-weight:700;cursor:pointer">💾 บันทึก</button>
         </div>
     `);
 
-    // art style picker
-    shadowRoot.querySelectorAll(".art-card").forEach(card => {
-        card.addEventListener("click", () => {
-            shadowRoot.querySelectorAll(".art-card").forEach(c => c.classList.remove("active"));
-            shadowRoot.querySelectorAll(".art-active-badge").forEach(b => b.remove());
-            card.classList.add("active");
-            const badge = document.createElement("div");
-            badge.className = "art-active-badge";
-            badge.textContent = "✓";
-            card.appendChild(badge);
-            getGlobal().artStyle = card.dataset.style;
-        });
+    shadowRoot.querySelectorAll(".art-card").forEach(c => c.addEventListener("click", () => {
+        shadowRoot.querySelectorAll(".art-card").forEach(x => { x.style.border="2px solid #262626"; x.style.background="#121212"; });
+        c.style.border = "2px solid #0095f6"; c.style.background = "#1a1a2e";
+        g.artStyle = c.dataset.style;
+    }));
+    shadowRoot.querySelectorAll(".mode-card").forEach(c => c.addEventListener("click", () => {
+        shadowRoot.querySelectorAll(".mode-card").forEach(x => { x.style.border="2px solid #262626"; x.style.background="#121212"; });
+        c.style.border = "2px solid #dc2743"; c.style.background = "rgba(220,39,67,0.1)";
+        g.tokenMode = c.dataset.mode;
+    }));
+    shadowRoot.getElementById("set-chance").addEventListener("input", e => {
+        shadowRoot.getElementById("chance-lbl").textContent = e.target.value + "%";
     });
-
-    shadowRoot.querySelectorAll(".token-card").forEach(card => {
-        card.addEventListener("click", () => {
-            shadowRoot.querySelectorAll(".token-card").forEach(c => c.classList.remove("active"));
-            card.classList.add("active");
-            getGlobal().tokenMode = card.dataset.token;
-        });
+    // simple toggle click for autopost
+    const apSlider = shadowRoot.getElementById("set-autopost-slider");
+    const apKnob = shadowRoot.getElementById("set-autopost-knob");
+    shadowRoot.getElementById("set-autopost").addEventListener("change", e => {
+        apSlider.style.background = e.target.checked ? "#dc2743" : "#3a3a3a";
+        apKnob.style.left = e.target.checked ? "21px" : "3px";
     });
-
-    const chanceSlider = shadowRoot.getElementById("setting-chance");
-    const chanceVal = shadowRoot.getElementById("chance-val");
-    chanceSlider.addEventListener("input", () => {
-        chanceVal.textContent = chanceSlider.value + "%";
+    const mnSlider = shadowRoot.getElementById("set-multinpc-slider");
+    const mnKnob = shadowRoot.getElementById("set-multinpc-knob");
+    shadowRoot.getElementById("set-multinpc").addEventListener("change", e => {
+        mnSlider.style.background = e.target.checked ? "#dc2743" : "#3a3a3a";
+        mnKnob.style.left = e.target.checked ? "21px" : "3px";
     });
-
-    shadowRoot.getElementById("reset-counter").addEventListener("click", () => {
-        resetSessionCounter();
-        toast("✓ รีเซ็ต counter รอบนี้แล้ว");
-        closeModal();
-        openInAppSettings();
-    });
-
-    shadowRoot.getElementById("settings-close").addEventListener("click", closeModal);
-    shadowRoot.getElementById("settings-save").addEventListener("click", () => {
-        const g2 = getGlobal();
-        g2.multiNpc = shadowRoot.getElementById("setting-multinpc").checked;
-        g2.autoPost = shadowRoot.getElementById("setting-autopost").checked;
-        g2.cooldownEnabled = shadowRoot.getElementById("setting-cooldown").checked;
-        g2.postChance = parseInt(chanceSlider.value) / 100;
-        try {
-            $("#instachar-toggle-multinpc").prop("checked", g2.multiNpc);
-            $("#instachar-toggle-autopost").prop("checked", g2.autoPost);
-            $("#instachar-chance-slider").val(Math.round(g2.postChance * 100));
-            $("#instachar-chance-val").text(Math.round(g2.postChance * 100) + "%");
-        } catch (e) {}
+    shadowRoot.getElementById("set-cancel").addEventListener("click", closeModal);
+    shadowRoot.getElementById("set-save").addEventListener("click", () => {
+        g.autoPost = shadowRoot.getElementById("set-autopost").checked;
+        g.multiNpc = shadowRoot.getElementById("set-multinpc").checked;
+        g.postChance = parseInt(shadowRoot.getElementById("set-chance").value) / 100;
+        try { $("#instachar-toggle-autopost").prop("checked", g.autoPost); } catch(e) {}
         save();
         closeModal();
-        toast("✓ บันทึกแล้ว — " + (ART_STYLES[g2.artStyle]?.name || "?") + " · " + (getTokenConfig().label));
+        toast("✓ บันทึกแล้ว");
         renderCurrentTab();
     });
 }
 
+// 🆕 Smart Post Now — manual 1-call mega batch
+async function smartPostNow(statusCb) {
+    const data = getCharData();
+    if (!data || data.npcs.length === 0) { toast("ไม่มี NPC"); return []; }
+    if (statusCb) statusCb("💰 1 call กำลังทำงาน...");
+    const recent = getRecentChat(15) || "(slice-of-life)";
+    const result = data.npcs.length >= 2
+        ? await generateMegaBatch(recent)
+        : [await generatePostFor(data.npcs[0], recent)].filter(Boolean);
+    if (statusCb) statusCb(result.length > 0 ? `✅ ${result.length} โพสต์!` : "ไม่สำเร็จ");
+    return result;
+}
+
+
 // ---------- Renderers ----------
 function renderCurrentTab() {
     const data = getCharData();
-    // 🆕 Always remove DM-mode class when leaving DM thread (added by openDM)
-    if (shadowRoot) {
-        const screen = shadowRoot.querySelector(".screen");
-        if (screen) screen.classList.remove("dm-mode");
-    }
     if (!data) {
         if (shadowRoot) shadowRoot.getElementById("view").innerHTML = '<div class="empty"><div class="empty-icon">👀</div><div class="empty-title">ยังไม่ได้เลือกตัวละคร</div></div>';
         return;
@@ -1962,17 +1291,13 @@ function renderFeed() {
     if (!data) return;
     const view = shadowRoot.getElementById("view");
     const posts = [...data.posts].reverse();
-    const g = getGlobal();
-    const cfg = getTokenConfig();
-    const styleName = ART_STYLES[g.artStyle || "modern"]?.name || "?";
 
-    const postBar = `<div class="post-bar" style="justify-content:space-between;color:#a8a8a8;font-size:12px;align-items:center">
-        <span>🤖 ${cfg.label} • ${styleName}</span>
-        <span style="opacity:0.6">⚙ มุมขวาบน → ตั้งค่า</span>
+    const postBar = `<div class="post-bar" style="justify-content:center;color:#a8a8a8;font-size:12px">
+        🤖 Auto-post activated — Characters post themselves! ✨
     </div>`;
 
     if (posts.length === 0) {
-        view.innerHTML = postBar + '<div class="empty"><div class="empty-icon">📷</div><div class="empty-title">ยังไม่มีโพสต์</div><div class="empty-sub">ลองคุยกับตัวละคร เขาจะโพสต์เอง!<br/><br/>หรือกดปุ่ม <b style="color:#dc2743">🎭 ให้ NPC โพสต์เลย!</b><br/>ในแท็บ Profile (ไอคอนขวาสุด)</div></div>';
+        view.innerHTML = postBar + '<div class="empty"><div class="empty-icon">📷</div><div class="empty-title">ยังไม่มีโพสต์</div><div class="empty-sub">ลองคุยกับตัวละคร เขาจะโพสต์เอง!</div></div>';
         return;
     }
 
@@ -2004,15 +1329,13 @@ function renderPostCard(post) {
     const totalComments = (post.comments ? post.comments.length : 0) + (post.userComments ? post.userComments.length : 0);
     const moreComments = totalComments > 3 ? `<div class="empty-small" style="padding:4px 14px;text-align:left">ดูคอมเมนต์ทั้งหมด ${totalComments} รายการ</div>` : "";
     const hashtagHtml = (post.hashtags || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join(" ");
-    const tagsHtml = (post.tags || []).length > 0 ? `<div style="padding:2px 14px;font-size:12px;color:#737373">📌 ติดป้ายชื่อ: ${(post.tags || []).map(t => `<span class="tag-chip">${escapeHtml(t)}</span>`).join(" ")}</div>` : "";
-    const moodBadge = post.mood ? `<span class="mood-badge mood-${escapeHtml(post.mood)}">${escapeHtml(post.mood)}</span>` : "";
 
     return `<article class="post" data-post="${post.id}">
         <header class="post-head">
             <div class="post-user" data-npc="${post.authorId || ''}">
                 <img class="avatar" src="${escapeHtml(post.authorAvatar)}" onerror="this.src='${defaultAvatar(post.author)}'"/>
                 <div class="post-user-info"><div class="username">${escapeHtml(post.authorUsername || post.author)}</div>
-                ${moodBadge ? `<div class="post-mood">${moodBadge}</div>` : ""}</div>
+                ${post.mood ? `<div class="post-mood">${escapeHtml(post.mood)}</div>` : ""}</div>
             </div>
             <div class="post-menu" data-post="${post.id}">⋯
                 <div class="post-menu-dropdown" data-dropdown="${post.id}">
@@ -2029,7 +1352,6 @@ function renderPostCard(post) {
         </div>
         <div class="post-likes">${post.likes.toLocaleString()} คนกดใจ</div>
         <div class="post-caption"><b>${escapeHtml(post.authorUsername || post.author)}</b> ${escapeHtml(post.caption)} ${hashtagHtml}</div>
-        ${tagsHtml}
         <div class="post-comments">${npcComments}${userComments}</div>
         ${moreComments}
         <div class="post-time">${timeAgo(post.timestamp)}ที่แล้ว</div>
@@ -2355,159 +1677,39 @@ function renderDMList() {
     if (!data) return;
     const view = shadowRoot.getElementById("view");
     const npcsWithDms = data.npcs;
-    const gossipKeys = Object.keys(data.npcDms || {}).filter(k => (data.npcDms[k].messages || []).length > 0);
-
-    const dmTab = data._dmSubTab || "user";
-
     view.innerHTML = `<div class="dm-header"><div class="dm-title">ข้อความ</div></div>
-    <div class="dm-section-tab">
-        <button class="dm-tab-btn ${dmTab === "user" ? "active" : ""}" data-sub="user">👤 ของฉัน</button>
-        <button class="dm-tab-btn ${dmTab === "gossip" ? "active" : ""}" data-sub="gossip">👀 ลือ NPC ${gossipKeys.length > 0 ? `<span style="background:#ed4956;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px">${gossipKeys.length}</span>` : ""}</button>
-    </div>
     <div class="dm-list">
-        ${dmTab === "user" ? (
-            npcsWithDms.length === 0 ? '<div class="empty-small">ยังไม่มีตัวละคร</div>' :
+        ${npcsWithDms.length === 0 ? '<div class="empty-small">ยังไม่มีตัวละคร</div>' :
             npcsWithDms.map(n => {
                 const thread = data.dms[n.id] || [];
                 const last = thread[thread.length - 1];
                 return `<div class="dm-item" data-npc="${n.id}">
                     <img class="avatar" src="${escapeHtml(n.avatar)}" onerror="this.src='${defaultAvatar(n.name)}'"/>
                     <div class="dm-info">
-                        <div class="dm-name">${escapeHtml(n.displayName)}${n.currentMood ? ` <span class="mood-badge mood-${escapeHtml(n.currentMood)}">${escapeHtml(n.currentMood)}</span>` : ""}</div>
-                        <div class="dm-preview">${last ? escapeHtml(last.text.slice(0, 60)) : "เริ่มคุย..."}</div>
+                        <div class="dm-name">${escapeHtml(n.displayName)}</div>
+                        <div class="dm-preview">${last ? escapeHtml(last.text.slice(0, 50)) : "เริ่มคุย..."}</div>
                     </div>
                     ${thread.length > 0 ? `<button class="dm-item-del" data-clear="${n.id}" title="ลบประวัติแชท">🗑</button>` : ""}
                 </div>`;
-            }).join("")
-        ) : (
-            gossipKeys.length === 0 ? '<div class="empty-small" style="padding:30px 20px"><div style="font-size:32px;margin-bottom:8px">👀</div>ยังไม่มีคนนินทาใคร<br/><span style="font-size:11px;color:#737373">ตอน NPCs โพสต์เยอะๆ จะแอบ DM กันเอง</span></div>' :
-            (`<div style="padding:6px 14px;display:flex;justify-content:flex-end;border-bottom:1px solid #1a1a1a">
-                <button id="clear-all-gossip" style="background:transparent;border:1px solid #ed4956;color:#ed4956;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">🧹 ล้างทั้งหมด</button>
-            </div>` +
-            gossipKeys.map(key => {
-                const thread = data.npcDms[key];
-                const a = findNpc(thread.participants[0]);
-                const b = findNpc(thread.participants[1]);
-                if (!a || !b) return "";
-                const last = thread.messages[thread.messages.length - 1];
-                const lastAuthor = last ? findNpc(last.npcId) : null;
-                return `<div class="dm-item" data-gossip="${key}">
-                    <div class="dm-peek-pair">
-                        <img src="${escapeHtml(a.avatar)}" onerror="this.src='${defaultAvatar(a.name)}'"/>
-                        <img src="${escapeHtml(b.avatar)}" onerror="this.src='${defaultAvatar(b.name)}'"/>
-                    </div>
-                    <div class="dm-info">
-                        <div class="dm-name">${escapeHtml(a.displayName)} ↔ ${escapeHtml(b.displayName)}</div>
-                        <div class="dm-preview">${lastAuthor ? `<b>${escapeHtml(lastAuthor.displayName)}:</b> ` : ""}${last ? escapeHtml(last.text.slice(0, 50)) : ""}</div>
-                    </div>
-                    <button class="dm-item-del" data-clear-gossip="${key}" title="ลบ">🗑</button>
-                </div>`;
-            }).join(""))
-        )}
+            }).join("")}
     </div>`;
-
-    // tab switcher
-    shadowRoot.querySelectorAll(".dm-tab-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-            data._dmSubTab = btn.dataset.sub;
+    shadowRoot.querySelectorAll(".dm-item").forEach(el => {
+        el.addEventListener("click", (e) => {
+            if (e.target.classList.contains("dm-item-del")) return;
+            openDM(el.dataset.npc);
+        });
+    });
+    shadowRoot.querySelectorAll(".dm-item-del").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.clear;
+            if (!confirm("ลบประวัติแชทนี้?")) return;
+            delete data.dms[id];
+            save();
             renderDMList();
+            toast("ลบแชทแล้ว ✓");
         });
     });
-
-    if (dmTab === "user") {
-        shadowRoot.querySelectorAll(".dm-item[data-npc]").forEach(el => {
-            el.addEventListener("click", (e) => {
-                if (e.target.classList.contains("dm-item-del")) return;
-                openDM(el.dataset.npc);
-            });
-        });
-        shadowRoot.querySelectorAll("[data-clear]").forEach(btn => {
-            btn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                const id = btn.dataset.clear;
-                if (!confirm("ลบประวัติแชทนี้?")) return;
-                delete data.dms[id];
-                save();
-                renderDMList();
-                toast("ลบแชทแล้ว ✓");
-            });
-        });
-    } else {
-        shadowRoot.querySelectorAll(".dm-item[data-gossip]").forEach(el => {
-            el.addEventListener("click", (e) => {
-                if (e.target.classList.contains("dm-item-del")) return;
-                openGossipPeek(el.dataset.gossip);
-            });
-        });
-        shadowRoot.querySelectorAll("[data-clear-gossip]").forEach(btn => {
-            btn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                const k = btn.dataset.clearGossip;
-                if (!confirm("ลบบทสนทนานี้?")) return;
-                delete data.npcDms[k];
-                save();
-                renderDMList();
-            });
-        });
-        // 🆕 v0.13: clear-all-gossip — useful to wipe corrupted data from older versions
-        const clearAllBtn = shadowRoot.getElementById("clear-all-gossip");
-        if (clearAllBtn) {
-            clearAllBtn.addEventListener("click", () => {
-                if (!confirm("ลบ gossip ทั้งหมด? (แนะนำถ้าข้อมูลเก่าจาก v0.12 ชื่อผู้พูดผิด)")) return;
-                data.npcDms = {};
-                save();
-                renderDMList();
-                toast("✓ ล้าง gossip แล้ว — ครั้งหน้าจะถูกแล้ว");
-            });
-        }
-    }
-}
-
-// 🆕 Open NPC↔NPC gossip peek view
-function openGossipPeek(pairKey) {
-    if (!shadowRoot) return;
-    const data = getCharData();
-    if (!data) return;
-    const thread = data.npcDms && data.npcDms[pairKey];
-    if (!thread) return;
-    const view = shadowRoot.getElementById("view");
-    const screen = shadowRoot.querySelector(".screen");
-    if (screen) screen.classList.add("dm-mode");
-
-    const a = findNpc(thread.participants[0]);
-    const b = findNpc(thread.participants[1]);
-    if (!a || !b) { return renderDMList(); }
-
-    const messagesHtml = thread.messages.map(m => {
-        const speaker = findNpc(m.npcId);
-        const isA = m.npcId === a.id;
-        return `<div class="dm-msg ${isA ? "char" : "npc-other"}">
-            <div class="dm-msg-author">${escapeHtml(speaker ? speaker.displayName : "?")}</div>
-            ${escapeHtml(m.text)}
-        </div>`;
-    }).join("");
-
-    view.innerHTML = `<div class="dm-view">
-        <div class="dm-chat-head">
-            <button class="back-btn" id="back">←</button>
-            <div class="dm-peek-pair">
-                <img src="${escapeHtml(a.avatar)}" style="width:32px;height:32px;border-radius:50%;border:2px solid #000"/>
-                <img src="${escapeHtml(b.avatar)}" style="width:32px;height:32px;border-radius:50%;border:2px solid #000"/>
-            </div>
-            <div class="dm-chat-name">${escapeHtml(a.displayName)} ↔ ${escapeHtml(b.displayName)}</div>
-        </div>
-        <div class="dm-peek-banner">👀 คุณกำลังแอบดูแชทลับ — พวกเขาไม่รู้ว่าคุณเห็น</div>
-        <div class="dm-thread" id="dm-thread">
-            ${messagesHtml}
-        </div>
-    </div>`;
-
-    shadowRoot.getElementById("back").addEventListener("click", () => {
-        if (screen) screen.classList.remove("dm-mode");
-        renderDMList();
-    });
-    const tEl = shadowRoot.getElementById("dm-thread");
-    if (tEl) tEl.scrollTop = tEl.scrollHeight;
 }
 
 function openDM(npcId) {
@@ -2517,44 +1719,23 @@ function openDM(npcId) {
     const npc = findNpc(npcId);
     if (!npc) return;
     const view = shadowRoot.getElementById("view");
-    const screen = shadowRoot.querySelector(".screen");
-    if (screen) screen.classList.add("dm-mode");
     const thread = data.dms[npcId] || [];
-
-    // Render messages — supports user / char / npc-other (peek messages from other NPCs)
-    const messagesHtml = thread.map((m, i) => {
-        if (m.from === "user") {
-            return `<div class="dm-msg user">${escapeHtml(m.text)}<button class="msg-del" data-idx="${i}">✕</button></div>`;
-        }
-        if (m.from === "npc_other") {
-            const other = findNpc(m.npcId);
-            const otherName = other ? other.displayName : (m.authorName || "?");
-            return `<div class="dm-msg npc-other"><div class="dm-msg-author">@${escapeHtml(otherName)}</div>${escapeHtml(m.text)}<button class="msg-del" data-idx="${i}">✕</button></div>`;
-        }
-        return `<div class="dm-msg char">${escapeHtml(m.text)}<button class="msg-del" data-idx="${i}">✕</button></div>`;
-    }).join("");
-
-    view.innerHTML = `<div class="dm-view">
-        <div class="dm-chat-head">
-            <button class="back-btn" id="back">←</button>
-            <img class="avatar" src="${escapeHtml(npc.avatar)}" onerror="this.src='${defaultAvatar(npc.name)}'"/>
-            <div class="dm-chat-name">${escapeHtml(npc.displayName)}${npc.currentMood ? ` <span class="mood-badge mood-${escapeHtml(npc.currentMood)}">${escapeHtml(npc.currentMood)}</span>` : ""}</div>
-            <button class="dm-clear-btn" id="clear-thread">🗑 ลบ</button>
-        </div>
-        <div class="dm-thread" id="dm-thread">
-            ${messagesHtml}
-            ${thread.length === 0 ? '<div class="empty-small" style="text-align:center;padding:20px">ส่งข้อความแรกเลย</div>' : ""}
-        </div>
-        <div class="dm-input-wrap">
-            <input type="text" id="dm-input" placeholder="ข้อความ..."/>
-            <button id="dm-send">ส่ง</button>
-        </div>
+    view.innerHTML = `<div class="dm-chat-head">
+        <button class="back-btn" id="back">←</button>
+        <img class="avatar" src="${escapeHtml(npc.avatar)}" onerror="this.src='${defaultAvatar(npc.name)}'"/>
+        <div class="dm-chat-name">${escapeHtml(npc.displayName)}</div>
+        <button class="dm-clear-btn" id="clear-thread">🗑 ลบ</button>
+    </div>
+    <div class="dm-thread" id="dm-thread">
+        ${thread.map((m, i) => `<div class="dm-msg ${m.from === "user" ? "user" : "char"}">
+            ${escapeHtml(m.text)}<button class="msg-del" data-idx="${i}">✕</button></div>`).join("")}
+        ${thread.length === 0 ? '<div class="empty-small">ส่งข้อความแรกเลย</div>' : ""}
+    </div>
+    <div class="dm-input-wrap">
+        <input type="text" id="dm-input" placeholder="ข้อความ..."/>
+        <button id="dm-send">ส่ง</button>
     </div>`;
-
-    shadowRoot.getElementById("back").addEventListener("click", () => {
-        if (screen) screen.classList.remove("dm-mode");
-        getGlobal().currentTab = "dm"; renderCurrentTab();
-    });
+    shadowRoot.getElementById("back").addEventListener("click", () => { getGlobal().currentTab = "dm"; renderCurrentTab(); });
     shadowRoot.getElementById("clear-thread").addEventListener("click", () => {
         if (!confirm("ลบประวัติแชทกับ " + npc.name + "?")) return;
         delete data.dms[npcId];
@@ -2621,15 +1802,14 @@ function renderMyProfile() {
         <button class="primary-btn" id="save-profile">💾 บันทึกโปรไฟล์</button>
 
         <h3 style="margin-top:24px;font-size:15px">📋 ตัวละครใน IG (${data.npcs.length})</h3>
-        <div class="compose-hint" style="margin-bottom:8px">✅ ตัวละครเหล่านี้จะโพสต์เองอัตโนมัติ! (Multi-NPC mode)</div>
+        <div class="compose-hint" style="margin-bottom:8px">✅ ตัวละครเหล่านี้จะโพสต์เองอัตโนมัติ!</div>
         <div id="npc-list">
             ${data.npcs.map(n => `<div class="npc-item">
                 <img class="avatar" src="${escapeHtml(n.avatar)}" onerror="this.src='${defaultAvatar(n.name)}'"/>
                 <div class="npc-info">
-                    <div class="npc-name">${escapeHtml(n.name)}${n.currentMood ? ` <span class="mood-badge mood-${escapeHtml(n.currentMood)}">${escapeHtml(n.currentMood)}</span>` : ""}</div>
+                    <div class="npc-name">${escapeHtml(n.name)}</div>
                     ${n.role ? `<div class="npc-role">Role: ${escapeHtml(n.role)}</div>` : ""}
                     <div class="npc-bio">${escapeHtml(n.bio || "(no bio)")}</div>
-                    ${n.lastPostAt ? `<div style="font-size:10px;color:#737373;margin-top:2px">โพสต์ล่าสุด ${timeAgo(n.lastPostAt)}ก่อน</div>` : ""}
                 </div>
                 <button class="comment-del" data-edit-npc="${n.id}" title="แก้ไข">✎</button>
                 <button class="comment-del" data-del-npc="${n.id}" title="ลบ">🗑</button>
@@ -2637,10 +1817,10 @@ function renderMyProfile() {
         </div>
 
         <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-            <button class="secondary-btn" id="add-npc" style="flex:1">+ เพิ่ม</button>
-            <button class="secondary-btn" id="scan-npcs" style="flex:1;background:linear-gradient(45deg,#1a1a2e,#16213e);border:1px solid #0095f6;color:#0095f6">🔍 Lorebook</button>
-            <button class="secondary-btn" id="scan-chat-npcs" style="flex:1;background:linear-gradient(45deg,#1a2e1a,#162e13);border:1px solid #4caf50;color:#4caf50">💬 แชท</button>
-            <button class="smart-post-btn" id="smart-post-now" style="flex:1 1 100%;margin-top:6px">🎭 ให้ NPC โพสต์เลย!</button>
+            <button class="secondary-btn" id="add-npc" style="flex:1">+ เพิ่มตัวละคร</button>
+            <button class="secondary-btn" id="scan-npcs" style="flex:1;background:linear-gradient(45deg,#1a1a2e,#16213e);border:1px solid #0095f6;color:#0095f6">🔍 สแกน Lorebook</button>
+            <button class="secondary-btn" id="scan-chat-npcs" style="flex:1 1 100%;background:linear-gradient(45deg,#1a2e1a,#162e13);border:1px solid #4caf50;color:#4caf50">💬 สแกนจากแชท</button>
+            <button id="smart-post-now" style="flex:1 1 100%;margin-top:6px;padding:10px;background:linear-gradient(45deg,#f09433,#dc2743,#bc1888);color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer">🎭 ให้ NPC โพสต์เลย! ($5)</button>
         </div>
         <div id="scan-status" style="font-size:12px;color:#a8a8a8;text-align:center;padding:4px 0;min-height:18px"></div>
 
@@ -2702,18 +1882,41 @@ function renderMyProfile() {
         }
     });
 
-    // 🆕 ปุ่ม Smart Post Now — manually trigger multi-NPC posts
-    shadowRoot.getElementById("smart-post-now").addEventListener("click", async () => {
+    // ✅ ปุ่มสแกนจากแชท
+    shadowRoot.getElementById("scan-chat-npcs").addEventListener("click", async () => {
         const statusEl = shadowRoot.getElementById("scan-status");
-        const btn = shadowRoot.getElementById("smart-post-now");
-        btn.disabled = true;
-        btn.textContent = "⏳ กำลังให้ NPC โพสต์...";
-        await smartPostNow((msg) => { if (statusEl) statusEl.textContent = msg; });
-        btn.disabled = false;
-        btn.textContent = "🎭 ให้ NPC โพสต์เลย!";
-        renderMyProfile();
-        setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 3000);
+        const btn = shadowRoot.getElementById("scan-chat-npcs");
+        const loreBtn = shadowRoot.getElementById("scan-npcs");
+        const addBtn = shadowRoot.getElementById("add-npc");
+        btn.disabled = true; loreBtn.disabled = true; addBtn.disabled = true;
+        btn.textContent = "⏳ กำลังสแกนแชท...";
+        const added = await extractNpcsFromChat((msg) => {
+            if (statusEl) statusEl.textContent = msg;
+        });
+        btn.disabled = false; loreBtn.disabled = false; addBtn.disabled = false;
+        btn.textContent = "💬 สแกนจากแชท";
+        if (added.length > 0) {
+            toast(`✅ พบ NPC ใหม่ ${added.length} ตัวในแชท: ${added.map(n => n.name).join(", ")}`);
+            renderMyProfile();
+        } else {
+            if (statusEl) statusEl.textContent = "ไม่พบ NPC ใหม่ในแชท";
+            setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 3000);
+        }
     });
+
+    // 🆕 Smart Post Now button
+    const smartBtn = shadowRoot.getElementById("smart-post-now");
+    if (smartBtn) {
+        smartBtn.addEventListener("click", async () => {
+            smartBtn.disabled = true;
+            smartBtn.textContent = "⏳ กำลังโหลด...";
+            await smartPostNow(msg => { if (statusEl) statusEl.textContent = msg; });
+            smartBtn.disabled = false;
+            smartBtn.textContent = "🎭 ให้ NPC โพสต์เลย! ($5)";
+            renderMyProfile();
+            setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 3000);
+        });
+    }
 }
 
 // ✅ FIXED: openNpcModal พร้อม role dropdown + avatar preview
@@ -2813,61 +2016,24 @@ async function onMessageReceived() {
         const ctx = getContext();
         const chat = ctx.chat || [];
         const msg = chat[chat.length - 1];
-        if (!msg || msg.is_user || msg.is_system) { log("Skipped: user/system message", false); return; }
-        if (Math.random() > g.postChance) { log(`Random skip: ${Math.round(g.postChance * 100)}% chance`, false); return; }
-
-        // 🆕 Cooldown — prevent rapid-fire $5 calls
-        if (g.cooldownEnabled !== false) {
-            const last = (g.llmStats && g.llmStats.lastCallAt) || 0;
-            const minGapMs = (g.cooldownSeconds || 30) * 1000;
-            if (Date.now() - last < minGapMs) {
-                log(`💸 Cooldown active — skipped ($${(g.llmStats && g.llmStats.sessionCalls * 5) || 0} so far)`, false);
-                return;
-            }
-        }
-
+        if (!msg || msg.is_user || msg.is_system) return;
+        if (Math.random() > g.postChance) { log("Random skip", false); return; }
         const data = getCharData();
         if (!data) return;
-        const sceneText = msg.mes || "";
-
-        // 🆕 ALL modes use generateMegaBatch (1 call) when ≥2 NPCs available
-        if (data.npcs.length >= 2 && g.multiNpc !== false) {
-            log(`💰 1-call mega batch starting...`);
-            const result = await generateMegaBatch(sceneText);
-            if (result.posts.length > 0) return;
-            // fallback to single-NPC if batch empty
+        // Multi-NPC mega batch (1 call)
+        if (g.multiNpc !== false && data.npcs.length >= 2) {
+            const created = await generateMegaBatch(msg.mes || "");
+            if (created.length > 0) return;
         }
-
-        // Single-NPC fallback (also 1 call with inline comments)
+        // Single-NPC fallback (1 call)
         let npc = msg.name ? findNpcByName(msg.name) : null;
         if (!npc) npc = ensureNpcFromCharacterCard();
-        if (!npc) { log("Auto-post skipped: no NPC found", true); return; }
-        await generatePostFor(npc, sceneText);
+        if (!npc) return;
+        await generatePostFor(npc, msg.mes || "");
     } catch (e) { log("message handler: " + e.message, true); }
 }
 
-// 🆕 Smart "Generate now" — manual trigger using mega batch
-async function smartPostNow(statusCb) {
-    const data = getCharData();
-    if (!data || data.npcs.length === 0) {
-        toast("ไม่มี NPC — ลองสแกน Lorebook ก่อน");
-        return [];
-    }
-    if (statusCb) statusCb("💰 1 call กำลังทำงาน...");
-    const recent = getRecentChat(15) || "(general slice-of-life moment in this story)";
-    if (data.npcs.length >= 2) {
-        const result = await generateMegaBatch(recent);
-        if (statusCb) statusCb(result.posts.length > 0 ? `✅ ได้ ${result.posts.length} โพสต์${result.gossip ? " + นินทา" : ""}!` : "ไม่สามารถโพสต์ได้");
-        return result.posts;
-    }
-    // Single NPC fallback
-    const npc = data.npcs[0];
-    const post = await generatePostFor(npc, recent);
-    if (statusCb) statusCb(post ? "✅ โพสต์แล้ว!" : "ไม่สามารถโพสต์ได้");
-    return post ? [post] : [];
-}
 
-// 🆕 Generate a private DM between 2 NPCs (gossip system) — user can peek in DM tab
 function onChatChanged() {
     try {
         const data = getCharData();
@@ -2941,8 +2107,6 @@ async function loadSettingsUI() {
         const g = getGlobal();
         $("#instachar-toggle-icon").prop("checked", g.iconVisible);
         $("#instachar-toggle-autopost").prop("checked", g.autoPost);
-        $("#instachar-toggle-multinpc").prop("checked", g.multiNpc !== false);
-        $("#instachar-toggle-gossip").prop("checked", g.npcGossip !== false);
         $("#instachar-toggle-ambient").prop("checked", g.ambientEnabled);
         $("#instachar-chance-slider").val(Math.round(g.postChance * 100));
         $("#instachar-chance-val").text(Math.round(g.postChance * 100) + "%");
@@ -2961,16 +2125,6 @@ function attachDelegation() {
             getGlobal().autoPost = $(this).prop("checked");
             save();
             log("Auto-post: " + ($(this).prop("checked") ? "ON ✓" : "OFF"), false);
-        })
-        .on("change.instachar", "#instachar-toggle-multinpc", function () {
-            getGlobal().multiNpc = $(this).prop("checked");
-            save();
-            log("Multi-NPC mode: " + ($(this).prop("checked") ? "ON ✓" : "OFF"), false);
-        })
-        .on("change.instachar", "#instachar-toggle-gossip", function () {
-            getGlobal().npcGossip = $(this).prop("checked");
-            save();
-            log("NPC Gossip: " + ($(this).prop("checked") ? "ON ✓" : "OFF"), false);
         })
         .on("change.instachar", "#instachar-toggle-ambient", function () {
             getGlobal().ambientEnabled = $(this).prop("checked");
@@ -3006,45 +2160,11 @@ function attachDelegation() {
 // ---------- Init ----------
 jQuery(async () => {
     log("InstaChar v" + VERSION + " init...");
-    console.log("[InstaChar] Starting init v" + VERSION);
     try {
-        const g = getGlobal();
-
-        // 🆕 v0.13 migration: force-show icon on upgrade so users always see it after install
-        if (g._lastVersion !== VERSION) {
-            log(`Upgrade detected: ${g._lastVersion || "fresh install"} → ${VERSION} — force-showing icon`);
-            g.iconVisible = true;
-            g.iconPos = null;
-            g._lastVersion = VERSION;
-            save();
-        }
-
-        // 🆕 v0.13.1: Mount BODY ICON FIRST — this is bulletproof, doesn't depend on Shadow DOM
-        ensureBodyIcon();
-
+        getGlobal();
         attachDelegation();
         await loadSettingsUI();
-
-        // mountUI is now optional — if it fails, body icon still works
-        try { mountUI(); }
-        catch (e) { log("mountUI failed (body icon still active): " + e.message, true); console.error("[InstaChar] mountUI:", e); }
-
-        // Re-ensure body icon after mountUI (which removes any orphaned shadowHost)
-        ensureBodyIcon();
-
-        // Retry mount if shadow DOM didn't initialize properly (after 1.5s)
-        setTimeout(() => {
-            if (!shadowRoot || !shadowRoot.getElementById("floater")) {
-                log("⚠️ Shadow icon missing — body icon still works", true);
-                try { mountUI(); } catch (e) { log("retry mountUI failed: " + e.message, true); }
-            }
-            // Always re-ensure body icon
-            if (!document.getElementById("instachar-body-icon")) {
-                log("⚠️ Body icon disappeared — re-mounting");
-                ensureBodyIcon();
-            }
-        }, 1500);
-
+        mountUI();
         if (eventSource && event_types) {
             try {
                 if (event_types.CHAT_CHANGED) eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
@@ -3052,12 +2172,6 @@ jQuery(async () => {
             } catch (e) { log("event bind: " + e.message, true); }
         }
         if (getGlobal().ambientEnabled) scheduleAmbient();
-        log("✅ Ready! v" + VERSION + " — Bulletproof body icon active");
-        console.log("[InstaChar] ✅ Ready. If icon is missing, run: window.__instaCharRescue()");
-    } catch (e) {
-        log("Init FAILED: " + e.message, true);
-        console.error("[InstaChar] Init failed:", e);
-        // Last resort — try to at least mount the body icon
-        try { ensureBodyIcon(); } catch (_) {}
-    }
+        log("✅ Ready! v" + VERSION + " — Modal Fix + Lorebook Scan + Role Editor");
+    } catch (e) { log("Init FAILED: " + e.message, true); }
 });
