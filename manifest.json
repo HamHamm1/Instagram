@@ -1,12 +1,12 @@
 {
-    "display_name": "📱 InstaChar — One Call = $5 Mega Batch (v0.12)",
+    "display_name": "📱 InstaChar — 5 Art Styles + In-app Settings (v0.11)",
     "loading_order": 100,
     "requires": [],
     "optional": [],
     "js": "index.js",
     "css": "style.css",
     "author": "HamHamm1",
-    "version": "0.12.0",
+    "version": "0.11.0",
     "homePage": "https://github.com/HamHamm1/Instagram",
     "auto_update": true
 }
