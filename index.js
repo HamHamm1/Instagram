@@ -1,23 +1,32 @@
-/* InstaChar v0.16.0 — New features on v0.9 stable base */
+/* InstaChar v0.17.0 — New features on v0.9 stable base */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.16.0";
+const VERSION = "0.17.0";
 
 // ✅ Role detection mapping
+// 🆕 v0.17 — Role keywords ที่แม่นยำขึ้น (ต้องเป็น relationship-marker จริงๆ ไม่ใช่ word match อะไรก็ได้)
+// + เพิ่ม role ใหม่: "เพื่อนสนิท" / "คนรู้จัก" / "รุ่นพี่" / "รุ่นน้อง" / "ครอบครัว"
 const ROLE_KEYWORDS = {
-    "พี่": ["พี่", "older brother", "big brother", "兄", "兄貴"],
-    "น้อง": ["น้อง", "younger sibling", "little brother", "妹", "弟"],
-    "แม่": ["แม่", "mother", "mom", "mum", "mama", "母"],
-    "พ่อ": ["พ่อ", "father", "dad", "papa", "父"],
-    "เพื่อน": ["เพื่อน", "friend", "buddy", "mate", "친구"],
-    "คู่รัก": ["แฟน", "หนึ่ง", "lover", "girlfriend", "boyfriend", "spouse", "妻", "夫"],
-    "ลูก": ["ลูก", "son", "daughter", "child", "kid", "子"],
-    "เจ้านาย": ["เจ้านาย", "boss", "master", "sir", "ma'am", "employer"],
-    "ผู้ใหญ่": ["ผู้ใหญ่", "elder", "senior", "teacher", "professor"],
+    "พี่ชาย":    ["พี่ชาย", "older brother", "big brother", "兄貴", "นี่พี่ของ", "is my brother", "is his brother", "is her brother"],
+    "พี่สาว":    ["พี่สาว", "older sister", "姉"],
+    "น้องชาย":   ["น้องชาย", "younger brother", "little brother", "弟"],
+    "น้องสาว":   ["น้องสาว", "younger sister", "little sister", "妹"],
+    "แม่":       ["แม่ของ", "is the mother", "mother of", "mom of"],
+    "พ่อ":       ["พ่อของ", "is the father", "father of", "dad of"],
+    "ลูกชาย":    ["ลูกชาย", "son of"],
+    "ลูกสาว":    ["ลูกสาว", "daughter of"],
+    "แฟน":       ["เป็นแฟน", "boyfriend of", "girlfriend of", "is dating", "lover of", "is in a relationship with"],
+    "เพื่อนสนิท": ["เพื่อนสนิท", "best friend", "closest friend", "bff"],
+    "เพื่อน":     ["เป็นเพื่อน", "เพื่อนของ", "เพื่อนร่วมห้อง", "เพื่อนร่วมงาน", "friend of", "classmate", "coworker", "roommate"],
+    "รุ่นพี่":    ["รุ่นพี่", "senpai", "senior at school"],
+    "รุ่นน้อง":   ["รุ่นน้อง", "kouhai", "junior at school"],
+    "เจ้านาย":   ["เป็นเจ้านาย", "is the boss", "boss of", "manager of"],
+    "ลูกน้อง":   ["ลูกน้องของ", "subordinate", "employee of"],
+    "คนรู้จัก":  ["คนรู้จัก", "acquaintance"],
 };
 
 const DEFAULT_GLOBAL = {
@@ -292,28 +301,101 @@ function parseJson(text) {
 
 // ✅ Auto-detect role/relationship
 function detectRole(npc, description, chatHistory, loreContext) {
-    const fullText = ((description || "") + " " + (chatHistory || "") + " " + (loreContext || "")).toLowerCase();
+    // ⚠️ Keyword fallback — ใช้แค่ตอน LLM ไม่พร้อม
+    // หา keyword ที่อยู่ใกล้ชื่อ NPC (ภายใน 30 ตัวอักษร) เท่านั้น เพื่อไม่ให้ match ของคนอื่น
+    const fullText = ((description || "") + " " + (loreContext || "")).toLowerCase();
+    const npcName = npc && npc.name ? npc.name.toLowerCase() : "";
+    if (!npcName) return null;
     for (const [role, keywords] of Object.entries(ROLE_KEYWORDS)) {
         for (const kw of keywords) {
-            if (fullText.includes(kw.toLowerCase())) return role;
+            const kwLower = kw.toLowerCase();
+            const kwIdx = fullText.indexOf(kwLower);
+            if (kwIdx === -1) continue;
+            // หาว่า keyword ใกล้ชื่อ NPC ใน 30 ตัวอักษรไหม
+            const nameIdx = fullText.indexOf(npcName);
+            if (nameIdx === -1) continue;
+            if (Math.abs(kwIdx - nameIdx) <= 30) return role;
         }
     }
     return null;
 }
 
+// 🆕 v0.17 — ใช้ LLM ตรวจ role ของ NPC จาก context ทั้งหมด (แม่นยำกว่า keyword match เยอะ)
+async function detectRoleWithLLM(npcName, description, chatHistory, loreContext) {
+    const userName = getUserName();
+    const card = getCharacterCard();
+    const protagonist = card ? card.name : "the protagonist";
+    const prompt = `[NPC Relationship Detection]
+Main protagonist: ${protagonist}
+User/player: ${userName}
+NPC to analyze: ${npcName}
+
+NPC description: ${(description || "(none)").slice(0, 600)}
+
+Story/lore context: ${(loreContext || "").slice(0, 800)}
+
+Recent chat: ${(chatHistory || "").slice(-1500)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+What is "${npcName}"'s relationship to ${userName} (the player)?
+
+Pick ONE from this list:
+- พี่ชาย / พี่สาว (older sibling — actually older AND family)
+- น้องชาย / น้องสาว (younger sibling — actually younger AND family)
+- แม่ / พ่อ (parent — biological/adoptive)
+- ลูกชาย / ลูกสาว (child)
+- แฟน (romantic partner — currently dating ${userName})
+- เพื่อนสนิท (very close friend, hangs out a lot, uses กู/มึง)
+- เพื่อน (regular friend/classmate/coworker — friendly but not super close)
+- รุ่นพี่ (school/work senior, NOT family)
+- รุ่นน้อง (school/work junior, NOT family)
+- เจ้านาย (boss/superior at work)
+- ลูกน้อง (subordinate)
+- คนรู้จัก (acquaintance — knows them but not close, uses formal language)
+
+⚠️ RULES:
+- Default to "คนรู้จัก" if uncertain — DON'T guess "พี่"/"แม่" without strong evidence
+- "พี่"/"น้อง" requires actual age difference + family relationship
+- Just being older doesn't make someone "พี่" — they need to be a sibling or close enough that ${userName} calls them "พี่" directly
+- "เพื่อนสนิท" = uses กู/มึง with each other in chat. "เพื่อน" = friendly but uses ฉัน/นาย or first names
+
+Respond with ONE WORD only (the role name in Thai). No explanation.`;
+    try {
+        const response = await callLLM(prompt, "Output ONE word only — the role name.");
+        const cleaned = (response || "").trim().replace(/[^ก-๙a-zA-Z]/g, "").slice(0, 30);
+        // ตรวจว่าเป็น role ที่รู้จัก
+        const validRoles = Object.keys(ROLE_KEYWORDS);
+        for (const r of validRoles) {
+            if (cleaned === r || cleaned.startsWith(r) || r.startsWith(cleaned)) return r;
+        }
+        return "คนรู้จัก"; // safe default
+    } catch (e) {
+        log("detectRoleWithLLM failed: " + e.message, true);
+        return null;
+    }
+}
+
 // ✅ Get pronoun & speech style based on role
 function getRoleContext(role) {
     const roleMap = {
-        "พี่": { pronoun: "พี่", description: "ผู้ใหญ่ที่เป็นพี่ชาย", styleHint: "พูดปกติ เป็นผู้ใหญ่ บ้างครั้งอาจหาบ้าง" },
-        "น้อง": { pronoun: "น้อง", description: "คนที่เล็กกว่า", styleHint: "พูดเหมือนน้องชาย น้อยใจ บ้างครั้งเอ้อ" },
-        "แม่": { pronoun: "แม่", description: "แม่", styleHint: "พูดเป็นแม่ เมตตา บางครั้งโวย" },
-        "พ่อ": { pronoun: "ป๊า", description: "พ่อ", styleHint: "พูดเป็นพ่อ เรียบร้อย บ้างครั้งเรียบหรือเสียดสี" },
-        "เพื่อน": { pronoun: "ฉัน/กู", description: "เพื่อน", styleHint: "พูดกู-มึง สนิท ขี้ขลาด บ้างครั้งหยาบ" },
-        "คู่รัก": { pronoun: "ฉัน", description: "คู่รัก", styleHint: "พูดปกติ โรแมนติก เคารพ บ้างครั้งเจ้าเล่น" },
-        "ลูก": { pronoun: "ลูก", description: "ลูก", styleHint: "พูดเป็นลูก บ้างครั้งเอ้อ เรียกพ่อแม่" },
-        "เจ้านาย": { pronoun: "ฉัน", description: "เจ้านาย", styleHint: "พูดสุภาพ เรียบร้อย ยกย่องผู้ใหญ่" },
+        "พี่ชาย":    { pronoun: "พี่",  styleHint: "เรียกตัวเองว่า 'พี่' เรียก user ว่าชื่อหรือ 'น้อง'. พูดเป็นพี่ชาย คอยเอ็นดู บางครั้งสั่งสอน" },
+        "พี่สาว":    { pronoun: "พี่",  styleHint: "เรียกตัวเองว่า 'พี่' เรียก user ว่าชื่อหรือ 'น้อง'. พูดเป็นพี่สาว ห่วงใย บางครั้งบ่น" },
+        "น้องชาย":   { pronoun: "ผม",  styleHint: "เรียกตัวเองว่า 'ผม' หรือชื่อเล่น เรียก user ว่า 'พี่'. พูดเป็นน้องชาย น่ารัก บางครั้งงอน" },
+        "น้องสาว":   { pronoun: "หนู", styleHint: "เรียกตัวเองว่า 'หนู' หรือชื่อ เรียก user ว่า 'พี่'. พูดเป็นน้องสาว น่ารัก ติดพี่" },
+        "แม่":       { pronoun: "แม่",  styleHint: "เรียกตัวเองว่า 'แม่' เรียก user ว่า 'ลูก' หรือชื่อ. พูดเป็นแม่ ห่วงใย บ่นเรื่องกินข้าว" },
+        "พ่อ":       { pronoun: "พ่อ",  styleHint: "เรียกตัวเองว่า 'พ่อ' หรือ 'ป๊า' เรียก user ว่า 'ลูก' หรือชื่อ. พูดเป็นพ่อ เรียบๆ บางครั้งดุ" },
+        "ลูกชาย":    { pronoun: "ผม",  styleHint: "เรียกตัวเองว่า 'ผม' เรียก user ว่า 'พ่อ/แม่' หรือ 'ป๊า/ม๊า'." },
+        "ลูกสาว":    { pronoun: "หนู", styleHint: "เรียกตัวเองว่า 'หนู' เรียก user ว่า 'พ่อ/แม่'." },
+        "แฟน":       { pronoun: "ฉัน", styleHint: "เรียกตัวเองว่า 'ฉัน' หรือชื่อเล่น เรียก user ว่า 'แฟน' / ชื่อเล่น. พูดโรแมนติก หวานๆ" },
+        "เพื่อนสนิท": { pronoun: "กู",  styleHint: "เรียกตัวเองว่า 'กู' เรียก user ว่า 'มึง'. พูดสนิท หยาบ ขำๆ ใช้สแลง 5555 เนี่ย ปัด" },
+        "เพื่อน":     { pronoun: "เรา", styleHint: "เรียกตัวเองว่า 'เรา' หรือชื่อ เรียก user ว่า 'เธอ' / ชื่อ. พูดเป็นเพื่อน *ไม่* ใช้กู/มึง — ภาษาสุภาพแต่สบายๆ" },
+        "รุ่นพี่":    { pronoun: "พี่",  styleHint: "เรียกตัวเองว่า 'พี่' เรียก user ว่า 'น้อง' หรือชื่อ. พูดเป็นรุ่นพี่ ดูแล/แนะนำ" },
+        "รุ่นน้อง":   { pronoun: "ผม/หนู", styleHint: "เรียกตัวเองว่า 'ผม/หนู' เรียก user ว่า 'พี่'. พูดสุภาพ เคารพ" },
+        "เจ้านาย":   { pronoun: "ผม/ฉัน", styleHint: "เรียกตัวเองว่า 'ผม/ฉัน' เรียก user ว่า 'คุณ' หรือชื่อ. พูดสั้น ตรงประเด็น" },
+        "ลูกน้อง":   { pronoun: "ผม", styleHint: "เรียกตัวเองว่า 'ผม' เรียก user ว่า 'พี่' หรือ 'หัวหน้า'. พูดสุภาพ" },
+        "คนรู้จัก":  { pronoun: "เรา/ผม/ฉัน", styleHint: "พูดสุภาพ ใช้ 'เรา'/'ผม'/'ฉัน' กับ 'คุณ' / ชื่อ. *ไม่* ใช้กู/มึง — เพราะไม่สนิท" },
     };
-    return roleMap[role] || { pronoun: "ฉัน", description: role || "คนปกติ", styleHint: "พูดปกติ" };
+    return roleMap[role] || { pronoun: "ฉัน", styleHint: "พูดปกติ สุภาพ ไม่ใช่กู/มึง" };
 }
 
 // ---------- NPC Management ----------
@@ -354,6 +436,7 @@ function createNpc(name, description, personality) {
         following: Math.floor(Math.random() * 500) + 50,
         userFollowing: false,
         role: detectedRole,
+        roleAutoDetected: false,  // 🆕 จะตั้งเป็น true หลัง LLM detect
     };
     try {
         const ctx = getContext();
@@ -366,7 +449,28 @@ function createNpc(name, description, personality) {
     } catch (e) {}
     data.npcs.push(npc);
     save();
-    log(`NPC created: ${name} (Role: ${detectedRole || "unknown"})`);
+    log(`NPC created: ${name} (initial role: ${detectedRole || "unknown"})`);
+
+    // 🆕 v0.17 — async re-detect role via LLM in background (more accurate)
+    // Won't block user, will update role later
+    setTimeout(async () => {
+        try {
+            // ถ้า user แก้ role เองแล้ว (มี roleAutoDetected = true), ไม่ต้องแตะ
+            if (npc.roleAutoDetected) return;
+            const betterRole = await detectRoleWithLLM(name, description, chatHistory, loreContext);
+            if (betterRole && betterRole !== detectedRole) {
+                npc.role = betterRole;
+                npc.roleAutoDetected = true;
+                save();
+                log(`✓ Role refined for ${name}: ${detectedRole || "?"} → ${betterRole}`);
+                if (isPanelOpen()) renderCurrentTab();
+            } else if (betterRole) {
+                npc.roleAutoDetected = true;
+                save();
+            }
+        } catch (e) {}
+    }, 500);
+
     return npc;
 }
 
@@ -575,17 +679,25 @@ async function callLLM(prompt, systemPrompt) {
 }
 
 function buildCharContext(npc) {
+    const userName = getUserName();
     const lines = [];
     lines.push(`Character: ${npc.name}`);
     if (npc.role) {
         const roleCtx = getRoleContext(npc.role);
-        lines.push(`Role: ${npc.role} | Pronoun: ${roleCtx.pronoun} | Style: ${roleCtx.styleHint}`);
+        lines.push(`Relationship to ${userName}: ${npc.role}`);
+        lines.push(`MUST use pronoun: "${roleCtx.pronoun}" — DO NOT use other pronouns`);
+        lines.push(`Speech style: ${roleCtx.styleHint}`);
+        // 🆕 เน้นย้ำว่าห้ามใช้ กู/มึง ถ้าไม่ใช่เพื่อนสนิท/พี่น้อง
+        const allowsKuMeung = ["เพื่อนสนิท"].includes(npc.role);
+        if (!allowsKuMeung) {
+            lines.push(`⚠️ DO NOT use กู/มึง — relationship "${npc.role}" doesn't use those pronouns. Only เพื่อนสนิท uses กู/มึง.`);
+        }
+    } else {
+        lines.push(`⚠️ Relationship unknown — use polite Thai (เรา/ผม/ฉัน + ชื่อ/คุณ). DO NOT use กู/มึง or family pronouns (พี่/น้อง/แม่/พ่อ).`);
     }
     if (npc.description) lines.push(`Description: ${npc.description.slice(0, 200)}`);
-    // ลด recent chat จาก 10 → 4 messages, จาก 1500 → 400 chars
     const recent = getRecentChat(4);
     if (recent) lines.push(`Recent chat (match tone/slang):\n${recent.slice(-400)}`);
-    // ตัด lorebook ออก — ยาวเกินไป ไม่คุ้มกับ latency
     return lines.join("\n");
 }
 
@@ -609,28 +721,39 @@ async function generateMegaBatch(sceneContext) {
     const sceneText = (sceneContext || "").slice(0, 800) || "(slice-of-life)";
     const recentChat = getRecentChat(5);
     const candidates = data.npcs.slice(0, 10);
-    const roster = candidates.map(n =>
-        `id=${n.id}|name=${n.name}|user=${n.username}|role=${n.role||"?"}|bio=${(n.description||n.bio||"").slice(0,80)}`
-    ).join("\n");
+    const roster = candidates.map(n => {
+        const roleCtx = n.role ? getRoleContext(n.role) : null;
+        const pronoun = roleCtx ? roleCtx.pronoun : "เรา/ผม/ฉัน";
+        const usesKu = n.role === "เพื่อนสนิท";
+        return `id=${n.id}|name=${n.name}|user=${n.username}|role=${n.role||"คนรู้จัก"}|MUST_USE_PRONOUN="${pronoun}"|${usesKu?"can use กู/มึง":"DO NOT use กู/มึง"}|bio=${(n.description||n.bio||"").slice(0,80)}`;
+    }).join("\n");
 
     const gossipFmt = cfg.gossip ? `,"gossip":{"npcIdA":"id","npcIdB":"id","messages":[{"speakerId":"id","text":"thai"}]}` : "";
     const gossipRule = cfg.gossip ? `
 3️⃣ BONUS GOSSIP DM: Pick 2 NPCs, generate 5-7 private messages alternating between them.
-   Each message must have "speakerId" = the EXACT npcId of the speaker (not "A"/"B", not a name).` : "";
+   Each message must have "speakerId" = the EXACT npcId of the speaker (not "A"/"B", not a name).
+   ⚠️ Use the pronoun and slang style of EACH speaker according to their relationship.` : "";
 
     const prompt = `[MEGA BATCH — 1 LLM call = all content]
 Scene: ${sceneText}
 Recent chat: ${recentChat.slice(-800)}
 Protagonist: ${card ? card.name : "?"} | User: ${userName}
-NPCs:
+NPCs (each has REQUIRED pronoun based on relationship):
 ${roster}
 
+⚠️ CRITICAL PRONOUN RULES:
+- Each NPC MUST use the exact pronoun listed in their roster line
+- Only "เพื่อนสนิท" can use กู/มึง — others must NOT
+- "เพื่อน" (regular friend) uses เรา/นาย — NOT กู/มึง
+- "คนรู้จัก" (acquaintance) uses ผม/ฉัน + คุณ — formal, NOT กู/มึง
+- "พี่/น้อง/แม่/พ่อ" use family pronouns — only if actual family relationship
+
 1️⃣ Pick ${cfg.multiMin}-${cfg.multiMax} NPCs most relevant to scene. For each:
-   - Thai caption: ${cfg.caption}, exact pronouns/slang, reference scene
+   - Thai caption: ${cfg.caption}, USE THEIR EXACT PRONOUN from roster, reference scene
    - 6-10 hashtags
    - English image prompt (25-35 words): specify [subject + pose + expression] + [location/setting] + [lighting/time of day] + [mood/atmosphere]. anime illustration style. NO real people.
    - Mood: happy/sad/flirty/chill/excited/moody/proud/jealous/lonely/mischievous/thoughtful/tired/hyped/angry/soft
-2️⃣ ${cfg.comments} comments per post (mix: other NPCs in-character + anonymous followers, Thai, no "${userName}")${gossipRule}
+2️⃣ ${cfg.comments} comments per post (mix: other NPCs using THEIR pronouns + anonymous followers, Thai, no "${userName}")${gossipRule}
 
 JSON only: {"posts":[{"npcId":"id","caption":"thai","imagePrompt":"english","hashtags":["#a"],"mood":"chill","comments":[{"username":"u","text":"thai","npcId":"id_or_null"}]}]${gossipFmt}}`;
 
