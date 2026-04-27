@@ -1,11 +1,11 @@
-/* InstaChar v0.15.0 — New features on v0.9 stable base */
+/* InstaChar v0.16.0 — New features on v0.9 stable base */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.15.0";
+const VERSION = "0.16.0";
 
 // ✅ Role detection mapping
 const ROLE_KEYWORDS = {
@@ -32,6 +32,7 @@ const DEFAULT_GLOBAL = {
     multiNpc: true,
     npcGossip: true,
     tokenMode: "heavy",
+    cooldownSeconds: 30,
 };
 
 function newCharData() {
@@ -41,6 +42,7 @@ function newCharData() {
         posts: [],
         dms: {},
         npcDms: {},
+        unreadDms: {},   // 🆕 { npcId: count } — DM unread per NPC
         userProfile: { username: "", displayName: "", bio: "", avatar: "" },
         unreadCount: 0,
         selectedProfile: null,
@@ -162,6 +164,7 @@ function getCharData() {
     if (!d.posts) d.posts = [];
     if (!d.dms) d.dms = {};
     if (!d.npcDms) d.npcDms = {};
+    if (!d.unreadDms) d.unreadDms = {};
     if (!d.userProfile) d.userProfile = { username: "", displayName: "", bio: "", avatar: "" };
     if (d.unreadCount === undefined) d.unreadCount = 0;
     return d;
@@ -544,19 +547,26 @@ async function callLLM(prompt, systemPrompt) {
     if (!ctx) { try { ctx = getContext(); } catch (e) {} }
     if (!ctx) throw new Error("Could not get context");
     const sysPrompt = systemPrompt || "You are a data assistant. Respond with valid JSON only. No markdown. No explanations.";
+
+    // Timeout wrapper — ถ้า LLM ไม่ตอบใน 60 วิ ให้ reject
+    const withTimeout = (promise, ms) => {
+        const t = new Promise((_, reject) => setTimeout(() => reject(new Error("LLM timeout after " + ms/1000 + "s")), ms));
+        return Promise.race([promise, t]);
+    };
+
     if (typeof ctx.generateRaw === "function") {
         try {
-            const r = await ctx.generateRaw({ systemPrompt: sysPrompt, prompt: prompt });
+            const r = await withTimeout(ctx.generateRaw({ systemPrompt: sysPrompt, prompt: prompt }), 60000);
             if (r && String(r).trim() !== "") return r;
         } catch (e) { log("generateRaw: " + e.message, true); }
     }
     if (typeof ctx.generateQuietPrompt === "function") {
         try {
-            const r = await ctx.generateQuietPrompt({ quietPrompt: prompt });
+            const r = await withTimeout(ctx.generateQuietPrompt({ quietPrompt: prompt }), 60000);
             if (r && String(r).trim() !== "") return r;
         } catch (e1) {
             try {
-                const r = await ctx.generateQuietPrompt(prompt, false, false);
+                const r = await withTimeout(ctx.generateQuietPrompt(prompt, false, false), 60000);
                 if (r && String(r).trim() !== "") return r;
             } catch (e2) {}
         }
@@ -569,16 +579,13 @@ function buildCharContext(npc) {
     lines.push(`Character: ${npc.name}`);
     if (npc.role) {
         const roleCtx = getRoleContext(npc.role);
-        lines.push(`Role/Relationship: ${npc.role} (${roleCtx.description})`);
-        lines.push(`Speech style: ${roleCtx.styleHint}`);
-        lines.push(`Pronoun: ${roleCtx.pronoun}`);
+        lines.push(`Role: ${npc.role} | Pronoun: ${roleCtx.pronoun} | Style: ${roleCtx.styleHint}`);
     }
-    if (npc.description) lines.push(`Description: ${npc.description.slice(0, 500)}`);
-    if (npc.personality) lines.push(`Personality: ${npc.personality.slice(0, 300)}`);
-    const recent = getRecentChat(10);
-    if (recent) lines.push(`\nRecent chat excerpt (match this speech style/tone/slang/vocabulary):\n${recent.slice(-1500)}`);
-    const lore = getLoreBookContext();
-    if (lore) lines.push(`\nLorebook context:\n${lore.slice(-1000)}`);
+    if (npc.description) lines.push(`Description: ${npc.description.slice(0, 200)}`);
+    // ลด recent chat จาก 10 → 4 messages, จาก 1500 → 400 chars
+    const recent = getRecentChat(4);
+    if (recent) lines.push(`Recent chat (match tone/slang):\n${recent.slice(-400)}`);
+    // ตัด lorebook ออก — ยาวเกินไป ไม่คุ้มกับ latency
     return lines.join("\n");
 }
 
@@ -599,11 +606,11 @@ async function generateMegaBatch(sceneContext) {
     const cfg = getTokenConfig();
     const card = getCharacterCard();
     const userName = getUserName();
-    const sceneText = (sceneContext || "").slice(0, 1500) || "(slice-of-life)";
-    const recentChat = getRecentChat(15);
+    const sceneText = (sceneContext || "").slice(0, 800) || "(slice-of-life)";
+    const recentChat = getRecentChat(5);
     const candidates = data.npcs.slice(0, 10);
     const roster = candidates.map(n =>
-        `id=${n.id}|name=${n.name}|user=${n.username}|role=${n.role||"?"}|bio=${(n.description||n.bio||"").slice(0,150)}`
+        `id=${n.id}|name=${n.name}|user=${n.username}|role=${n.role||"?"}|bio=${(n.description||n.bio||"").slice(0,80)}`
     ).join("\n");
 
     const gossipFmt = cfg.gossip ? `,"gossip":{"npcIdA":"id","npcIdB":"id","messages":[{"speakerId":"id","text":"thai"}]}` : "";
@@ -690,7 +697,7 @@ async function generatePostFor(npc, sceneContext) {
     const data = getCharData();
     if (!data || !npc) return null;
     const charCtx = buildCharContext(npc);
-    const sceneText = sceneContext ? sceneContext.slice(0, 1000) : "(slice-of-life)";
+    const sceneText = sceneContext ? sceneContext.slice(0, 600) : "(slice-of-life)";
     const prompt = `[Instagram Post + Comments — 1 call]
 ${charCtx}
 Scene: ${sceneText}
@@ -798,12 +805,60 @@ Reply directly. No JSON. No prefix. Just the message.`;
         data.dms[npcId] = data.dms[npcId] || [];
         data.dms[npcId].push({ from: "char", text: reply, timestamp: Date.now() });
         data.unreadCount++;
+        data.unreadDms[npcId] = (data.unreadDms[npcId] || 0) + 1;  // 🆕 per-NPC unread
         save();
         flashIcon();
+        // 🆕 show toast notification
+        const npcName = npc.displayName || npc.name;
+        showDmToast(npcName, reply);
     } catch (e) { log("DM reply failed: " + e.message, true); }
 }
 
-// ---------- Shadow DOM ----------
+// 🆕 DM notification toast — ขึ้นข้างบนเหมือน IG notification จริง
+function showDmToast(npcName, text) {
+    try {
+        // ถ้าแอปเปิดอยู่ที่หน้า DM นั้น ไม่ต้องแสดง toast
+        if (isPanelOpen() && getGlobal().currentTab === "dm") return;
+        const existing = document.getElementById("instachar-dm-toast");
+        if (existing) existing.remove();
+        const toast = document.createElement("div");
+        toast.id = "instachar-dm-toast";
+        toast.innerHTML = `<span style="font-size:18px">💬</span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:#f5f5f5">${escapeHtmlBasic(npcName)}</div><div style="font-size:12px;color:#a8a8a8;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${escapeHtmlBasic(text.slice(0, 60))}</div></div>`;
+        toast.setAttribute("style", [
+            "position:fixed", "top:20px", "left:50%", "transform:translateX(-50%)",
+            "background:#1c1c1e", "border:1px solid #2a2a2e", "border-radius:16px",
+            "padding:12px 16px", "display:flex", "align-items:center", "gap:10px",
+            "z-index:2147483647", "cursor:pointer", "max-width:320px", "width:90vw",
+            "box-shadow:0 8px 32px rgba(0,0,0,0.5)",
+            "animation:instachar-slidein 0.3s ease-out",
+        ].join(";"));
+        // inject animation if not there
+        if (!document.getElementById("instachar-toast-style")) {
+            const s = document.createElement("style");
+            s.id = "instachar-toast-style";
+            s.textContent = "@keyframes instachar-slidein{from{opacity:0;transform:translateX(-50%) translateY(-20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}";
+            document.head.appendChild(s);
+        }
+        toast.addEventListener("click", () => {
+            toast.remove();
+            // เปิดแอปตรงไปหน้า DM
+            openPanel();
+            setTimeout(() => {
+                const data = getCharData();
+                const npc = data && data.npcs.find(n => (n.displayName || n.name) === npcName);
+                if (npc) { getGlobal().currentTab = "dm"; renderCurrentTab(); setTimeout(() => openDM(npc.id), 50); }
+            }, 100);
+        });
+        document.body.appendChild(toast);
+        setTimeout(() => { if (toast.parentNode) toast.remove(); }, 5000);
+    } catch (e) {}
+}
+
+function escapeHtmlBasic(s) {
+    return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+
 let shadowHost = null;
 let shadowRoot = null;
 
@@ -1300,12 +1355,14 @@ function openInAppSettings() {
 async function smartPostNow(statusCb) {
     const data = getCharData();
     if (!data || data.npcs.length === 0) { toast("ไม่มี NPC"); return []; }
-    if (statusCb) statusCb("💰 1 call กำลังทำงาน...");
-    const recent = getRecentChat(15) || "(slice-of-life)";
+    const cfg = getTokenConfig();
+    const label = cfg.multiMin === 1 ? "1 โพสต์" : `${cfg.multiMin}-${cfg.multiMax} โพสต์`;
+    if (statusCb) statusCb(`🤖 กำลัง generate ${label}... (รอสักครู่)`);
+    const recent = getRecentChat(5) || "(slice-of-life)";
     const result = data.npcs.length >= 2
         ? await generateMegaBatch(recent)
         : [await generatePostFor(data.npcs[0], recent)].filter(Boolean);
-    if (statusCb) statusCb(result.length > 0 ? `✅ ${result.length} โพสต์!` : "ไม่สำเร็จ");
+    if (statusCb) statusCb(result.length > 0 ? `✅ ได้ ${result.length} โพสต์แล้ว!` : "❌ ไม่สำเร็จ — ลองอีกครั้ง");
     return result;
 }
 
@@ -1735,13 +1792,19 @@ function renderDMList() {
             const last = thread[thread.length - 1];
             const mood = n.currentMood;
             const moodColor = { happy:"#ffc107",sad:"#90a4ae",flirty:"#ec407a",chill:"#4dd0e1",excited:"#ffa726",moody:"#ba68c8",proud:"#66bb6a",jealous:"#9575cd",lonely:"#7986cb",mischievous:"#ff8a65",thoughtful:"#b0bec5",tired:"#9e9e9e",hyped:"#ef5350",angry:"#ef5350",soft:"#f48fb1" }[mood] || "#a8a8a8";
+            const unread = (data.unreadDms || {})[n.id] || 0;
             return `<div class="dm-item" data-npc="${n.id}">
                 <img class="avatar" src="${escapeHtml(n.avatar)}" onerror="this.src='${defaultAvatar(n.name)}'"/>
                 <div class="dm-info">
                     <div class="dm-name">${escapeHtml(n.displayName)}${mood ? ` <span style="background:${moodColor}22;color:${moodColor};padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600">${escapeHtml(mood)}</span>` : ""}</div>
-                    <div class="dm-preview">${last ? escapeHtml(last.text.slice(0, 50)) : "เริ่มคุย..."}</div>
+                    <div class="dm-preview" style="${unread>0?"color:#f5f5f5;font-weight:600":""}">
+                        ${last ? escapeHtml(last.text.slice(0, 50)) : "เริ่มคุย..."}
+                    </div>
                 </div>
-                ${thread.length > 0 ? `<button class="dm-item-del" data-clear="${n.id}">🗑</button>` : ""}
+                <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+                    ${unread > 0 ? `<span style="background:#0095f6;color:white;font-size:11px;font-weight:700;min-width:20px;height:20px;padding:0 5px;border-radius:10px;display:flex;align-items:center;justify-content:center">${unread}</span>` : ""}
+                    ${thread.length > 0 ? `<button class="dm-item-del" data-clear="${n.id}">🗑</button>` : ""}
+                </div>
             </div>`;
         }).join("")
     ) : (
@@ -1841,6 +1904,11 @@ function openDM(npcId) {
     if (!data) return;
     const npc = findNpc(npcId);
     if (!npc) return;
+    // 🆕 clear unread badge เมื่อเปิด DM
+    if (data.unreadDms && data.unreadDms[npcId]) {
+        delete data.unreadDms[npcId];
+        save();
+    }
     const view = shadowRoot.getElementById("view");
     const thread = data.dms[npcId] || [];
     view.innerHTML = `<div class="dm-chat-head">
@@ -2132,17 +2200,47 @@ function openNpcModal(npcId) {
 }
 
 // ---------- Event hooks ----------
+let lastProcessedMsgKey = "";   // 🆕 dedup — กัน MESSAGE_RECEIVED ยิงซ้ำสำหรับข้อความเดียวกัน
+let lastPostTime = 0;           // 🆕 cooldown timestamp
+
 async function onMessageReceived() {
     try {
         const g = getGlobal();
-        if (!g.autoPost) { log("Auto-post disabled", false); return; }
+        if (!g.autoPost) { log("Auto-post: disabled", false); return; }
         const ctx = getContext();
         const chat = ctx.chat || [];
         const msg = chat[chat.length - 1];
         if (!msg || msg.is_user || msg.is_system) return;
-        if (Math.random() > g.postChance) { log("Random skip", false); return; }
+
+        // 🆕 DEDUP: กัน event fire ซ้ำสำหรับข้อความเดียว
+        const msgKey = (chat.length - 1) + "|" + (msg.send_date || "") + "|" + (msg.mes || "").slice(0, 50);
+        if (msgKey === lastProcessedMsgKey) {
+            log("Skip duplicate message event", false);
+            return;
+        }
+        lastProcessedMsgKey = msgKey;
+
+        // 🆕 COOLDOWN: ขั้นต่ำ 30 วิระหว่างโพสต์ (กันโพสต์รัวๆ)
+        const cooldownMs = (g.cooldownSeconds || 30) * 1000;
+        const sinceLast = Date.now() - lastPostTime;
+        if (sinceLast < cooldownMs) {
+            log(`Cooldown: ${Math.round((cooldownMs - sinceLast) / 1000)}s remaining`, false);
+            return;
+        }
+
+        // 🆕 Random skip: ใช้ postChance ตามที่ตั้งไว้ — log ให้ชัดว่ามัน skip จริง
+        const roll = Math.random();
+        if (roll > g.postChance) {
+            log(`Random skip (rolled ${roll.toFixed(2)} vs ${g.postChance})`, false);
+            return;
+        }
+
         const data = getCharData();
         if (!data) return;
+
+        log(`✓ Posting (rolled ${roll.toFixed(2)} <= ${g.postChance})`, false);
+        lastPostTime = Date.now();   // 🆕 บันทึกเวลาก่อนโพสต์ — กัน race condition
+
         // Multi-NPC mega batch (1 call)
         if (g.multiNpc !== false && data.npcs.length >= 2) {
             const created = await generateMegaBatch(msg.mes || "");
@@ -2202,8 +2300,10 @@ async function runAmbient() {
                     data.dms[npc.id] = data.dms[npc.id] || [];
                     data.dms[npc.id].push({ from: "char", text: reply, timestamp: Date.now() });
                     data.unreadCount++;
+                    data.unreadDms[npc.id] = (data.unreadDms[npc.id] || 0) + 1;
                     save();
                     flashIcon();
+                    showDmToast(npc.displayName || npc.name, reply);
                 }
             } catch {}
         } else {
