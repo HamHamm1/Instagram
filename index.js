@@ -1,11 +1,11 @@
-/* InstaChar v0.17.0 — New features on v0.9 stable base */
+/* InstaChar v0.18.0 — New features on v0.9 stable base */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.17.0";
+const VERSION = "0.18.0";
 
 // ✅ Role detection mapping
 // 🆕 v0.17 — Role keywords ที่แม่นยำขึ้น (ต้องเป็น relationship-marker จริงๆ ไม่ใช่ word match อะไรก็ได้)
@@ -436,7 +436,8 @@ function createNpc(name, description, personality) {
         following: Math.floor(Math.random() * 500) + 50,
         userFollowing: false,
         role: detectedRole,
-        roleAutoDetected: false,  // 🆕 จะตั้งเป็น true หลัง LLM detect
+        roleAutoDetected: false,
+        enabled: true,        // 🆕 v0.18: ปิดได้รายตัว — ไม่โพสต์/ไม่ส่ง DM
     };
     try {
         const ctx = getContext();
@@ -720,7 +721,8 @@ async function generateMegaBatch(sceneContext) {
     const userName = getUserName();
     const sceneText = (sceneContext || "").slice(0, 800) || "(slice-of-life)";
     const recentChat = getRecentChat(5);
-    const candidates = data.npcs.slice(0, 10);
+    const candidates = data.npcs.filter(n => n.enabled !== false).slice(0, 10);
+    if (candidates.length === 0) { log("All NPCs disabled — skip", false); return []; }
     const roster = candidates.map(n => {
         const roleCtx = n.role ? getRoleContext(n.role) : null;
         const pronoun = roleCtx ? roleCtx.pronoun : "เรา/ผม/ฉัน";
@@ -1378,6 +1380,55 @@ function showModal(html) {
 }
 function closeModal() { if (shadowRoot) shadowRoot.getElementById("modal-root").innerHTML = ""; }
 
+// 🆕 v0.18 — แก้ไขโพสต์ (caption / image prompt / image URL ตรงๆ)
+function openPostEditor(postId) {
+    const data = getCharData();
+    if (!data) return;
+    const post = data.posts.find(p => p.id === postId);
+    if (!post) return;
+    showModal(`
+        <h3 style="margin:0 0 12px">✏ แก้ไขโพสต์</h3>
+        <label style="font-size:11px;color:#a8a8a8">Caption</label>
+        <textarea id="ed-caption" style="width:100%;min-height:90px;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:13px;font-family:inherit;margin:4px 0 10px;box-sizing:border-box">${escapeHtml(post.caption)}</textarea>
+
+        <label style="font-size:11px;color:#a8a8a8">Image Prompt (regenerate รูปใหม่)</label>
+        <textarea id="ed-prompt" style="width:100%;min-height:60px;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:12px;font-family:inherit;margin:4px 0 10px;box-sizing:border-box">${escapeHtml(post.imagePrompt || "")}</textarea>
+
+        <label style="font-size:11px;color:#a8a8a8">หรือใส่ URL รูปเอง (override)</label>
+        <input type="text" id="ed-imgurl" placeholder="https://..." value="${escapeHtml(post.image || "")}" style="width:100%;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:12px;margin:4px 0 10px;box-sizing:border-box"/>
+
+        <label style="font-size:11px;color:#a8a8a8">Hashtags (คั่นด้วย space)</label>
+        <input type="text" id="ed-tags" value="${escapeHtml((post.hashtags||[]).join(" "))}" style="width:100%;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:12px;margin:4px 0 14px;box-sizing:border-box"/>
+
+        <div style="display:flex;gap:8px">
+            <button id="ed-cancel" style="flex:1;padding:10px;background:#262626;color:#f5f5f5;border:none;border-radius:8px;cursor:pointer">ยกเลิก</button>
+            <button id="ed-regen" style="flex:1;padding:10px;background:#1a3a5c;color:#0095f6;border:none;border-radius:8px;cursor:pointer">🎨 สร้างรูปใหม่</button>
+            <button id="ed-save" style="flex:1.5;padding:10px;background:linear-gradient(45deg,#dc2743,#bc1888);color:white;border:none;border-radius:8px;font-weight:700;cursor:pointer">💾 บันทึก</button>
+        </div>
+    `);
+    shadowRoot.getElementById("ed-cancel").addEventListener("click", closeModal);
+    shadowRoot.getElementById("ed-regen").addEventListener("click", () => {
+        const newPrompt = shadowRoot.getElementById("ed-prompt").value.trim();
+        if (!newPrompt) { toast("ใส่ image prompt ก่อน"); return; }
+        const newUrl = makeImageUrl(newPrompt, Date.now());
+        shadowRoot.getElementById("ed-imgurl").value = newUrl;
+        toast("✓ สร้าง URL รูปใหม่แล้ว — กดบันทึก");
+    });
+    shadowRoot.getElementById("ed-save").addEventListener("click", () => {
+        post.caption = shadowRoot.getElementById("ed-caption").value;
+        post.imagePrompt = shadowRoot.getElementById("ed-prompt").value;
+        const url = shadowRoot.getElementById("ed-imgurl").value.trim();
+        if (url) post.image = url;
+        const tagText = shadowRoot.getElementById("ed-tags").value;
+        post.hashtags = tagText.split(/\s+/).filter(t => t.startsWith("#")).slice(0, 12);
+        save();
+        closeModal();
+        renderCurrentTab();
+        toast("✓ บันทึกแล้ว");
+    });
+}
+
+
 // 🆕 In-app settings — เปิดจากปุ่ม ⚙ มุมขวาบน
 function openInAppSettings() {
     if (!shadowRoot) return;
@@ -1429,6 +1480,17 @@ function openInAppSettings() {
                 <input type="range" id="set-chance" min="0" max="100" step="5" value="${Math.round(g.postChance*100)}" style="width:100%;margin-top:4px;accent-color:#0095f6">
             </div>
         </div>
+
+        <div style="background:rgba(237,73,86,0.05);border:1px solid rgba(237,73,86,0.2);border-radius:10px;padding:12px;margin-bottom:14px">
+            <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:#ed4956">🧹 แก้ปัญหา NPC ปนกัน</div>
+            <div style="font-size:11px;color:#a8a8a8;margin-bottom:8px">ถ้ามี NPC จากตัวคาแรกเตอร์อื่นมาปน หรือ user profile เพี้ยน — ใช้ปุ่มข้างล่าง</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button id="set-clear-disabled-npcs" style="flex:1 1 auto;padding:8px;background:#262626;color:#f5f5f5;border:1px solid #ed4956;border-radius:6px;cursor:pointer;font-size:12px">ลบ NPC ที่ปิดอยู่</button>
+                <button id="set-reset-user" style="flex:1 1 auto;padding:8px;background:#262626;color:#f5f5f5;border:1px solid #ed4956;border-radius:6px;cursor:pointer;font-size:12px">รีเซ็ต User Profile</button>
+                <button id="set-clear-all-npcs" style="flex:1 1 100%;padding:8px;background:#262626;color:#ed4956;border:1px solid #ed4956;border-radius:6px;cursor:pointer;font-size:12px">⚠ ลบ NPC ทั้งหมด (เริ่มสแกนใหม่)</button>
+            </div>
+        </div>
+
         <div style="display:flex;gap:8px">
             <button id="set-cancel" style="flex:1;padding:10px;background:#262626;color:#f5f5f5;border:none;border-radius:8px;cursor:pointer">ปิด</button>
             <button id="set-save" style="flex:2;padding:10px;background:linear-gradient(45deg,#dc2743,#bc1888);color:white;border:none;border-radius:8px;font-weight:700;cursor:pointer">💾 บันทึก</button>
@@ -1462,6 +1524,38 @@ function openInAppSettings() {
         mnKnob.style.left = e.target.checked ? "21px" : "3px";
     });
     shadowRoot.getElementById("set-cancel").addEventListener("click", closeModal);
+    shadowRoot.getElementById("set-clear-disabled-npcs").addEventListener("click", () => {
+        const data = getCharData();
+        if (!data) return;
+        const before = data.npcs.length;
+        data.npcs = data.npcs.filter(n => n.enabled !== false);
+        const removed = before - data.npcs.length;
+        save();
+        toast(removed > 0 ? `✓ ลบ ${removed} ตัวที่ปิดไว้` : "ไม่มี NPC ที่ปิดอยู่");
+        renderCurrentTab();
+    });
+    shadowRoot.getElementById("set-reset-user").addEventListener("click", () => {
+        const data = getCharData();
+        if (!data) return;
+        if (!confirm("รีเซ็ต User Profile?\n(จะใช้ชื่อ/avatar ของ user RP ปัจจุบัน)")) return;
+        data.userProfile = { username: "", displayName: "", bio: "", avatar: "" };
+        save();
+        toast("✓ รีเซ็ต User Profile แล้ว");
+        renderCurrentTab();
+    });
+    shadowRoot.getElementById("set-clear-all-npcs").addEventListener("click", () => {
+        const data = getCharData();
+        if (!data) return;
+        if (!confirm("⚠ ลบ NPC ทั้งหมดของ character นี้?\n(โพสต์เก่าจะยังอยู่ แต่ NPCs จะถูกลบหมด ต้องสแกนใหม่)")) return;
+        data.npcs = [];
+        data.dms = {};
+        data.npcDms = {};
+        data.unreadDms = {};
+        save();
+        toast("✓ ลบ NPC ทั้งหมดแล้ว — สแกนใหม่ใน Profile tab");
+        closeModal();
+        renderCurrentTab();
+    });
     shadowRoot.getElementById("set-save").addEventListener("click", () => {
         g.autoPost = shadowRoot.getElementById("set-autopost").checked;
         g.multiNpc = shadowRoot.getElementById("set-multinpc").checked;
@@ -1562,6 +1656,7 @@ function renderPostCard(post) {
             </div>
             <div class="post-menu" data-post="${post.id}">⋯
                 <div class="post-menu-dropdown" data-dropdown="${post.id}">
+                    <div class="post-menu-item" data-edit-post="${post.id}">✏ แก้ไขโพสต์</div>
                     <div class="post-menu-item danger" data-del-post="${post.id}">🗑 ลบโพสต์</div>
                 </div>
             </div>
@@ -1624,6 +1719,12 @@ function attachFeedHandlers() {
             const pid = btn.dataset.delPost;
             if (!confirm("ลบโพสต์นี้?")) return;
             deletePost(pid);
+        });
+    });
+    shadowRoot.querySelectorAll("[data-edit-post]").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openPostEditor(btn.dataset.editPost);
         });
     });
     shadowRoot.querySelectorAll(".comment-del").forEach(btn => {
@@ -2118,16 +2219,20 @@ function renderMyProfile() {
         <h3 style="margin-top:24px;font-size:15px">📋 ตัวละครใน IG (${data.npcs.length})</h3>
         <div class="compose-hint" style="margin-bottom:8px">✅ ตัวละครเหล่านี้จะโพสต์เองอัตโนมัติ!</div>
         <div id="npc-list">
-            ${data.npcs.map(n => `<div class="npc-item">
+            ${data.npcs.map(n => {
+                const isOff = n.enabled === false;
+                return `<div class="npc-item" style="${isOff ? 'opacity:0.5' : ''}">
                 <img class="avatar" src="${escapeHtml(n.avatar)}" onerror="this.src='${defaultAvatar(n.name)}'"/>
                 <div class="npc-info">
-                    <div class="npc-name">${escapeHtml(n.name)}</div>
+                    <div class="npc-name">${escapeHtml(n.name)}${isOff ? ' <span style="font-size:10px;background:#666;color:white;padding:1px 6px;border-radius:8px">ปิด</span>' : ''}</div>
                     ${n.role ? `<div class="npc-role">Role: ${escapeHtml(n.role)}</div>` : ""}
                     <div class="npc-bio">${escapeHtml(n.bio || "(no bio)")}</div>
                 </div>
+                <button class="comment-del" data-toggle-npc="${n.id}" title="${isOff ? 'เปิด' : 'ปิด'}ตัวนี้">${isOff ? '🔇' : '🔊'}</button>
                 <button class="comment-del" data-edit-npc="${n.id}" title="แก้ไข">✎</button>
                 <button class="comment-del" data-del-npc="${n.id}" title="ลบ">🗑</button>
-            </div>`).join("")}
+            </div>`;
+            }).join("")}
         </div>
 
         <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
@@ -2167,6 +2272,14 @@ function renderMyProfile() {
 
     shadowRoot.getElementById("add-npc").addEventListener("click", () => openNpcModal(null));
     shadowRoot.querySelectorAll("[data-edit-npc]").forEach(b => b.addEventListener("click", () => openNpcModal(b.dataset.editNpc)));
+    shadowRoot.querySelectorAll("[data-toggle-npc]").forEach(b => b.addEventListener("click", () => {
+        const n = findNpc(b.dataset.toggleNpc);
+        if (!n) return;
+        n.enabled = n.enabled === false ? true : false;
+        save();
+        renderMyProfile();
+        toast(n.enabled === false ? `🔇 ปิด ${n.name}` : `🔊 เปิด ${n.name}`);
+    }));
     shadowRoot.querySelectorAll("[data-del-npc]").forEach(b => b.addEventListener("click", () => {
         const id = b.dataset.delNpc;
         const npc = findNpc(id);
@@ -2249,6 +2362,10 @@ function openNpcModal(npcId) {
             <input class="inline-input" id="npc-name" value="${npc ? escapeHtml(npc.name) : ""}"/>
         </div>
         <div class="row">
+            <label>Username IG (ตัดตัวเลขออกได้!)</label>
+            <input class="inline-input" id="npc-username" value="${npc ? escapeHtml(npc.username || "") : ""}" placeholder="เช่น natchaya, johnnydoe"/>
+        </div>
+        <div class="row">
             <label>คำอธิบาย (LLM จะใช้อันนี้จับสไตล์การพูด)</label>
             <textarea class="inline-input" id="npc-desc" rows="4" placeholder="เช่น: เจ้าชู้ พูดกู-มึง ชอบยั่ว...">${npc ? escapeHtml(npc.description || "") : ""}</textarea>
         </div>
@@ -2263,6 +2380,15 @@ function openNpcModal(npcId) {
                 ${roleOptions}
             </select>
         </div>
+        ${npc ? `<div class="row" style="background:rgba(220,39,67,0.05);padding:10px;border-radius:8px;border:1px solid rgba(220,39,67,0.15)">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0">
+                <input type="checkbox" id="npc-enabled" ${npc.enabled !== false ? "checked" : ""} style="width:18px;height:18px;cursor:pointer"/>
+                <span>
+                    <span style="font-size:13px;font-weight:600">เปิดใช้งานตัวละครนี้</span>
+                    <div style="font-size:11px;color:#a8a8a8;margin-top:2px">ปิด = ตัวนี้จะไม่โพสต์/comment/ส่ง DM</div>
+                </span>
+            </label>
+        </div>` : ""}
         <div class="row">
             <label>รูปโปรไฟล์</label>
             <label style="display:block;padding:10px;background:#262626;border-radius:8px;text-align:center;cursor:pointer;margin-bottom:8px">
@@ -2297,6 +2423,7 @@ function openNpcModal(npcId) {
 
     shadowRoot.getElementById("npc-save").addEventListener("click", () => {
         const name = shadowRoot.getElementById("npc-name").value.trim();
+        const username = shadowRoot.getElementById("npc-username").value.trim();
         const desc = shadowRoot.getElementById("npc-desc").value.trim();
         const bio = shadowRoot.getElementById("npc-bio").value.trim();
         const roleVal = shadowRoot.getElementById("npc-role").value;
@@ -2305,13 +2432,17 @@ function openNpcModal(npcId) {
         if (npc) {
             npc.name = name;
             npc.displayName = name;
+            if (username) npc.username = username.replace(/[^a-zA-Z0-9._]/g, "");
             npc.description = desc;
             npc.bio = bio;
-            npc.role = roleVal || detectRole(npc, desc, getRecentChat(20), getLoreBookContext()) || npc.role;
+            npc.role = roleVal || npc.role;
+            const enabledEl = shadowRoot.getElementById("npc-enabled");
+            if (enabledEl) npc.enabled = enabledEl.checked;
             if (avatarData) npc.avatar = avatarData;
         } else {
             const newNpc = createNpc(name, desc, "");
             newNpc.bio = bio;
+            if (username) newNpc.username = username.replace(/[^a-zA-Z0-9._]/g, "");
             newNpc.role = roleVal || newNpc.role;
             if (avatarData) newNpc.avatar = avatarData;
         }
@@ -2394,7 +2525,9 @@ async function runAmbient() {
     if (!g.ambientEnabled) return;
     const data = getCharData();
     if (!data || data.npcs.length === 0) return;
-    const npc = data.npcs[Math.floor(Math.random() * data.npcs.length)];
+    const enabledNpcs = data.npcs.filter(n => n.enabled !== false);
+    if (enabledNpcs.length === 0) return;
+    const npc = enabledNpcs[Math.floor(Math.random() * enabledNpcs.length)];
     const userPosts = data.posts.filter(p => p.isUserPost).slice(-5);
     const roll = Math.random();
     try {
