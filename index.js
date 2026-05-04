@@ -1,11 +1,11 @@
-/* InstaChar v0.18.0 — New features on v0.9 stable base */
+/* InstaChar v0.19.0 — New features on v0.9 stable base */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.18.0";
+const VERSION = "0.19.0";
 
 // ✅ Role detection mapping
 // 🆕 v0.17 — Role keywords ที่แม่นยำขึ้น (ต้องเป็น relationship-marker จริงๆ ไม่ใช่ word match อะไรก็ได้)
@@ -683,12 +683,20 @@ function buildCharContext(npc) {
     const userName = getUserName();
     const lines = [];
     lines.push(`Character: ${npc.name}`);
-    if (npc.role) {
+    // 🆕 v0.19 — custom pronouns ทับ role
+    if (npc.pronounSelf || npc.pronounUser) {
+        const ps = npc.pronounSelf || "(use role default)";
+        const pu = npc.pronounUser || "(use role default)";
+        lines.push(`Relationship to ${userName}: ${npc.role || "?"} (custom pronouns set)`);
+        lines.push(`MUST USE THESE EXACT PRONOUNS:`);
+        lines.push(`  - When ${npc.name} talks about THEMSELVES → use "${ps}"`);
+        lines.push(`  - When ${npc.name} talks TO/ABOUT ${userName} → use "${pu}"`);
+        lines.push(`⚠️ These pronouns are MANDATORY — they override default role pronouns`);
+    } else if (npc.role) {
         const roleCtx = getRoleContext(npc.role);
         lines.push(`Relationship to ${userName}: ${npc.role}`);
         lines.push(`MUST use pronoun: "${roleCtx.pronoun}" — DO NOT use other pronouns`);
         lines.push(`Speech style: ${roleCtx.styleHint}`);
-        // 🆕 เน้นย้ำว่าห้ามใช้ กู/มึง ถ้าไม่ใช่เพื่อนสนิท/พี่น้อง
         const allowsKuMeung = ["เพื่อนสนิท"].includes(npc.role);
         if (!allowsKuMeung) {
             lines.push(`⚠️ DO NOT use กู/มึง — relationship "${npc.role}" doesn't use those pronouns. Only เพื่อนสนิท uses กู/มึง.`);
@@ -724,10 +732,14 @@ async function generateMegaBatch(sceneContext) {
     const candidates = data.npcs.filter(n => n.enabled !== false).slice(0, 10);
     if (candidates.length === 0) { log("All NPCs disabled — skip", false); return []; }
     const roster = candidates.map(n => {
+        // 🆕 v0.19 — custom pronouns override role
+        const customSelf = n.pronounSelf;
+        const customUser = n.pronounUser;
         const roleCtx = n.role ? getRoleContext(n.role) : null;
-        const pronoun = roleCtx ? roleCtx.pronoun : "เรา/ผม/ฉัน";
-        const usesKu = n.role === "เพื่อนสนิท";
-        return `id=${n.id}|name=${n.name}|user=${n.username}|role=${n.role||"คนรู้จัก"}|MUST_USE_PRONOUN="${pronoun}"|${usesKu?"can use กู/มึง":"DO NOT use กู/มึง"}|bio=${(n.description||n.bio||"").slice(0,80)}`;
+        const selfPron = customSelf || (roleCtx ? roleCtx.pronoun : "เรา/ผม/ฉัน");
+        const userPron = customUser || "ชื่อ user/เธอ/คุณ";
+        const usesKu = (n.role === "เพื่อนสนิท") || customSelf === "กู" || customUser === "มึง";
+        return `id=${n.id}|name=${n.name}|user=${n.username}|role=${n.role||"คนรู้จัก"}|SELF_PRONOUN="${selfPron}"|CALLS_USER="${userPron}"|${usesKu?"can use กู/มึง":"DO NOT use กู/มึง"}|bio=${(n.description||n.bio||"").slice(0,80)}`;
     }).join("\n");
 
     const gossipFmt = cfg.gossip ? `,"gossip":{"npcIdA":"id","npcIdB":"id","messages":[{"speakerId":"id","text":"thai"}]}` : "";
@@ -744,11 +756,10 @@ NPCs (each has REQUIRED pronoun based on relationship):
 ${roster}
 
 ⚠️ CRITICAL PRONOUN RULES:
-- Each NPC MUST use the exact pronoun listed in their roster line
-- Only "เพื่อนสนิท" can use กู/มึง — others must NOT
-- "เพื่อน" (regular friend) uses เรา/นาย — NOT กู/มึง
-- "คนรู้จัก" (acquaintance) uses ผม/ฉัน + คุณ — formal, NOT กู/มึง
-- "พี่/น้อง/แม่/พ่อ" use family pronouns — only if actual family relationship
+- Each NPC has TWO pronouns in roster: SELF_PRONOUN (how they refer to themselves) and CALLS_USER (how they call ${userName})
+- USE THESE EXACTLY — they're set by the user explicitly
+- Only NPCs with "can use กู/มึง" tag may use those — others must NOT
+- These pronouns OVERRIDE any default role assumptions
 
 1️⃣ Pick ${cfg.multiMin}-${cfg.multiMax} NPCs most relevant to scene. For each:
    - Thai caption: ${cfg.caption}, USE THEIR EXACT PRONOUN from roster, reference scene
@@ -1395,7 +1406,13 @@ function openPostEditor(postId) {
         <textarea id="ed-prompt" style="width:100%;min-height:60px;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:12px;font-family:inherit;margin:4px 0 10px;box-sizing:border-box">${escapeHtml(post.imagePrompt || "")}</textarea>
 
         <label style="font-size:11px;color:#a8a8a8">หรือใส่ URL รูปเอง (override)</label>
-        <input type="text" id="ed-imgurl" placeholder="https://..." value="${escapeHtml(post.image || "")}" style="width:100%;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:12px;margin:4px 0 10px;box-sizing:border-box"/>
+        <input type="text" id="ed-imgurl" placeholder="https://..." value="${escapeHtml(post.image || "")}" style="width:100%;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:12px;margin:4px 0 6px;box-sizing:border-box"/>
+
+        <label style="display:block;padding:8px;background:#1a1a2e;border:1px dashed #0095f6;border-radius:8px;text-align:center;cursor:pointer;margin:4px 0 10px;color:#0095f6;font-size:12px">
+            📷 อัพโหลดรูปจากเครื่อง
+            <input type="file" id="ed-imgfile" accept="image/*" style="display:none"/>
+        </label>
+        <img id="ed-imgpreview" src="${escapeHtml(post.image || "")}" style="${post.image?"":"display:none;"}width:100%;max-height:200px;object-fit:cover;border-radius:8px;margin-bottom:10px;${post.image?"display:block":""}"/>
 
         <label style="font-size:11px;color:#a8a8a8">Hashtags (คั่นด้วย space)</label>
         <input type="text" id="ed-tags" value="${escapeHtml((post.hashtags||[]).join(" "))}" style="width:100%;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:12px;margin:4px 0 14px;box-sizing:border-box"/>
@@ -1412,7 +1429,24 @@ function openPostEditor(postId) {
         if (!newPrompt) { toast("ใส่ image prompt ก่อน"); return; }
         const newUrl = makeImageUrl(newPrompt, Date.now());
         shadowRoot.getElementById("ed-imgurl").value = newUrl;
-        toast("✓ สร้าง URL รูปใหม่แล้ว — กดบันทึก");
+        const prev = shadowRoot.getElementById("ed-imgpreview");
+        prev.src = newUrl; prev.style.display = "block";
+        toast("✓ สร้างรูปใหม่ — กดบันทึก");
+    });
+    // 🆕 อัพโหลดรูปจากเครื่อง
+    shadowRoot.getElementById("ed-imgfile").addEventListener("change", (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        if (f.size > 5 * 1024 * 1024) { toast("⚠ รูปใหญ่เกิน 5MB"); return; }
+        const r = new FileReader();
+        r.onload = (ev) => {
+            const dataUrl = ev.target.result;
+            shadowRoot.getElementById("ed-imgurl").value = dataUrl;
+            const prev = shadowRoot.getElementById("ed-imgpreview");
+            prev.src = dataUrl; prev.style.display = "block";
+            toast("✓ โหลดรูปแล้ว — กดบันทึก");
+        };
+        r.readAsDataURL(f);
     });
     shadowRoot.getElementById("ed-save").addEventListener("click", () => {
         post.caption = shadowRoot.getElementById("ed-caption").value;
@@ -2221,10 +2255,11 @@ function renderMyProfile() {
         <div id="npc-list">
             ${data.npcs.map(n => {
                 const isOff = n.enabled === false;
+                const customPron = (n.pronounSelf || n.pronounUser) ? `<span style="font-size:10px;background:rgba(0,149,246,0.15);color:#0095f6;padding:1px 6px;border-radius:8px;margin-left:4px">${escapeHtml(n.pronounSelf || "?")}/${escapeHtml(n.pronounUser || "?")}</span>` : "";
                 return `<div class="npc-item" style="${isOff ? 'opacity:0.5' : ''}">
                 <img class="avatar" src="${escapeHtml(n.avatar)}" onerror="this.src='${defaultAvatar(n.name)}'"/>
                 <div class="npc-info">
-                    <div class="npc-name">${escapeHtml(n.name)}${isOff ? ' <span style="font-size:10px;background:#666;color:white;padding:1px 6px;border-radius:8px">ปิด</span>' : ''}</div>
+                    <div class="npc-name">${escapeHtml(n.name)}${isOff ? ' <span style="font-size:10px;background:#666;color:white;padding:1px 6px;border-radius:8px">ปิด</span>' : ''}${customPron}</div>
                     ${n.role ? `<div class="npc-role">Role: ${escapeHtml(n.role)}</div>` : ""}
                     <div class="npc-bio">${escapeHtml(n.bio || "(no bio)")}</div>
                 </div>
@@ -2380,6 +2415,31 @@ function openNpcModal(npcId) {
                 ${roleOptions}
             </select>
         </div>
+        <div class="row" style="background:rgba(0,149,246,0.05);padding:10px;border-radius:8px;border:1px solid rgba(0,149,246,0.2)">
+            <label style="font-size:12px;font-weight:700;color:#0095f6;margin-bottom:6px;display:block">🗣 สรรพนาม (ตั้งเองได้ — override role)</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
+                <div>
+                    <label style="font-size:11px;color:#a8a8a8;display:block;margin-bottom:2px">บอทเรียกตัวเอง</label>
+                    <input class="inline-input" id="npc-pron-self" list="pron-self-list" placeholder="กู, ผม, หนู, พี่..." value="${npc && npc.pronounSelf ? escapeHtml(npc.pronounSelf) : ""}"/>
+                    <datalist id="pron-self-list">
+                        <option value="กู"/><option value="ข้า"/><option value="ผม"/><option value="ฉัน"/><option value="หนู"/><option value="เรา"/><option value="เค้า"/>
+                        <option value="พี่"/><option value="น้อง"/><option value="พ่อ"/><option value="แม่"/><option value="ป๊า"/><option value="ม๊า"/>
+                        <option value="เฮีย"/><option value="เจ๊"/><option value="หม่อมฉัน"/><option value="กระผม"/>
+                    </datalist>
+                </div>
+                <div>
+                    <label style="font-size:11px;color:#a8a8a8;display:block;margin-bottom:2px">บอทเรียกเรา</label>
+                    <input class="inline-input" id="npc-pron-user" list="pron-user-list" placeholder="มึง, เธอ, น้อง, ที่รัก..." value="${npc && npc.pronounUser ? escapeHtml(npc.pronounUser) : ""}"/>
+                    <datalist id="pron-user-list">
+                        <option value="มึง"/><option value="เจ้า"/><option value="ท่าน"/><option value="คุณ"/><option value="เธอ"/><option value="แก"/>
+                        <option value="พี่"/><option value="น้อง"/><option value="หนู"/><option value="ลูก"/>
+                        <option value="ที่รัก"/><option value="เบ๊บ"/><option value="เตง"/><option value="แฟน"/>
+                        <option value="สามี"/><option value="ภรรยา"/><option value="ป๊า"/><option value="ม๊า"/>
+                    </datalist>
+                </div>
+            </div>
+            <div style="font-size:10px;color:#737373;margin-top:6px">เว้นว่าง = ใช้ตาม Role ด้านบน</div>
+        </div>
         ${npc ? `<div class="row" style="background:rgba(220,39,67,0.05);padding:10px;border-radius:8px;border:1px solid rgba(220,39,67,0.15)">
             <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0">
                 <input type="checkbox" id="npc-enabled" ${npc.enabled !== false ? "checked" : ""} style="width:18px;height:18px;cursor:pointer"/>
@@ -2427,6 +2487,8 @@ function openNpcModal(npcId) {
         const desc = shadowRoot.getElementById("npc-desc").value.trim();
         const bio = shadowRoot.getElementById("npc-bio").value.trim();
         const roleVal = shadowRoot.getElementById("npc-role").value;
+        const pronSelf = shadowRoot.getElementById("npc-pron-self").value.trim();
+        const pronUser = shadowRoot.getElementById("npc-pron-user").value.trim();
         if (!name) { toast("ใส่ชื่อตัวละคร"); return; }
 
         if (npc) {
@@ -2436,6 +2498,8 @@ function openNpcModal(npcId) {
             npc.description = desc;
             npc.bio = bio;
             npc.role = roleVal || npc.role;
+            npc.pronounSelf = pronSelf || null;
+            npc.pronounUser = pronUser || null;
             const enabledEl = shadowRoot.getElementById("npc-enabled");
             if (enabledEl) npc.enabled = enabledEl.checked;
             if (avatarData) npc.avatar = avatarData;
@@ -2444,6 +2508,8 @@ function openNpcModal(npcId) {
             newNpc.bio = bio;
             if (username) newNpc.username = username.replace(/[^a-zA-Z0-9._]/g, "");
             newNpc.role = roleVal || newNpc.role;
+            newNpc.pronounSelf = pronSelf || null;
+            newNpc.pronounUser = pronUser || null;
             if (avatarData) newNpc.avatar = avatarData;
         }
         save();
