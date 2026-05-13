@@ -1,11 +1,11 @@
-/* InstaChar v0.19.0 — New features on v0.9 stable base */
+/* InstaChar v0.20.0 — New features on v0.9 stable base */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.19.0";
+const VERSION = "0.20.0";
 
 // ✅ Role detection mapping
 // 🆕 v0.17 — Role keywords ที่แม่นยำขึ้น (ต้องเป็น relationship-marker จริงๆ ไม่ใช่ word match อะไรก็ได้)
@@ -49,6 +49,7 @@ function newCharData() {
         name: "",
         npcs: [],
         posts: [],
+        stories: [],    // 🆕 v0.20: IG Stories (expire 24h)
         dms: {},
         npcDms: {},
         unreadDms: {},   // 🆕 { npcId: count } — DM unread per NPC
@@ -174,6 +175,7 @@ function getCharData() {
     if (!d.dms) d.dms = {};
     if (!d.npcDms) d.npcDms = {};
     if (!d.unreadDms) d.unreadDms = {};
+    if (!d.stories) d.stories = [];
     if (!d.userProfile) d.userProfile = { username: "", displayName: "", bio: "", avatar: "" };
     if (d.unreadCount === undefined) d.unreadCount = 0;
     return d;
@@ -747,6 +749,9 @@ async function generateMegaBatch(sceneContext) {
 3️⃣ BONUS GOSSIP DM: Pick 2 NPCs, generate 5-7 private messages alternating between them.
    Each message must have "speakerId" = the EXACT npcId of the speaker (not "A"/"B", not a name).
    ⚠️ Use the pronoun and slang style of EACH speaker according to their relationship.` : "";
+    const storyFmt = `,"story":{"npcId":"id","imagePrompt":"english 20 words","caption":"short thai 1 sentence"}`;
+    const storyRule = `
+4️⃣ STORY: Pick 1 NPC to post an IG Story. Generate image prompt (20 words, anime) + 1 short Thai caption.`;
 
     const prompt = `[MEGA BATCH — 1 LLM call = all content]
 Scene: ${sceneText}
@@ -766,9 +771,9 @@ ${roster}
    - 6-10 hashtags
    - English image prompt (25-35 words): specify [subject + pose + expression] + [location/setting] + [lighting/time of day] + [mood/atmosphere]. anime illustration style. NO real people.
    - Mood: happy/sad/flirty/chill/excited/moody/proud/jealous/lonely/mischievous/thoughtful/tired/hyped/angry/soft
-2️⃣ ${cfg.comments} comments per post (mix: other NPCs using THEIR pronouns + anonymous followers, Thai, no "${userName}")${gossipRule}
+2️⃣ ${cfg.comments} comments per post (mix: other NPCs using THEIR pronouns + anonymous followers, Thai, no "${userName}")${gossipRule}${storyRule}
 
-JSON only: {"posts":[{"npcId":"id","caption":"thai","imagePrompt":"english","hashtags":["#a"],"mood":"chill","comments":[{"username":"u","text":"thai","npcId":"id_or_null"}]}]${gossipFmt}}`;
+JSON only: {"posts":[{"npcId":"id","caption":"thai","imagePrompt":"english","hashtags":["#a"],"mood":"chill","comments":[{"username":"u","text":"thai","npcId":"id_or_null"}]}]${gossipFmt}${storyFmt}}`;
 
     try {
         const response = await callLLM(prompt, "Multi-character Instagram simulator. Output valid minified JSON only.");
@@ -819,6 +824,22 @@ JSON only: {"posts":[{"npcId":"id","caption":"thai","imagePrompt":"english","has
                     data.npcDms[key].messages.push({ npcId: speaker.id, authorName: speaker.displayName || speaker.name, text: m.text, timestamp: Date.now() + i * 1000 });
                 });
                 log(`👀 Gossip: ${nA.name} ↔ ${nB.name}`);
+            }
+        }
+        // 🆕 v0.20 story parser
+        if (parsed.story && parsed.story.npcId) {
+            const stNpc = findNpc(parsed.story.npcId) || candidates[0];
+            if (stNpc && parsed.story.imagePrompt) {
+                if (!data.stories) data.stories = [];
+                data.stories.push({
+                    id: uid("story"), isUser: false,
+                    authorId: stNpc.id, authorName: stNpc.displayName || stNpc.name,
+                    authorAvatar: stNpc.avatar, authorUsername: stNpc.username,
+                    image: makeImageUrl(parsed.story.imagePrompt, Date.now() + 999),
+                    caption: parsed.story.caption || "",
+                    timestamp: Date.now(),
+                });
+                log(`📱 Story: ${stNpc.name}`);
             }
         }
         save(); flashIcon();
@@ -1415,7 +1436,16 @@ function openPostEditor(postId) {
         <img id="ed-imgpreview" src="${escapeHtml(post.image || "")}" style="${post.image?"":"display:none;"}width:100%;max-height:200px;object-fit:cover;border-radius:8px;margin-bottom:10px;${post.image?"display:block":""}"/>
 
         <label style="font-size:11px;color:#a8a8a8">Hashtags (คั่นด้วย space)</label>
-        <input type="text" id="ed-tags" value="${escapeHtml((post.hashtags||[]).join(" "))}" style="width:100%;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:12px;margin:4px 0 14px;box-sizing:border-box"/>
+        <input type="text" id="ed-tags" value="${escapeHtml((post.hashtags||[]).join(" "))}" style="width:100%;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:12px;margin:4px 0 10px;box-sizing:border-box"/>
+
+        <div style="display:flex;gap:8px;margin-bottom:14px">
+            <div style="flex:1"><label style="font-size:11px;color:#a8a8a8">❤️ ยอด Likes</label>
+                <input type="number" id="ed-likes" value="${post.likes||0}" min="0" style="width:100%;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:13px;margin-top:4px;box-sizing:border-box"/>
+            </div>
+            <div style="flex:1;display:flex;align-items:flex-end;padding-bottom:2px">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="ed-userliked" ${post.userLiked?"checked":""} style="width:16px;height:16px"/> <span style="font-size:12px;color:#a8a8a8">User กดไลค์แล้ว</span></label>
+            </div>
+        </div>
 
         <div style="display:flex;gap:8px">
             <button id="ed-cancel" style="flex:1;padding:10px;background:#262626;color:#f5f5f5;border:none;border-radius:8px;cursor:pointer">ยกเลิก</button>
@@ -1455,6 +1485,8 @@ function openPostEditor(postId) {
         if (url) post.image = url;
         const tagText = shadowRoot.getElementById("ed-tags").value;
         post.hashtags = tagText.split(/\s+/).filter(t => t.startsWith("#")).slice(0, 12);
+        post.likes = Math.max(0, parseInt(shadowRoot.getElementById("ed-likes").value) || 0);
+        post.userLiked = shadowRoot.getElementById("ed-userliked").checked;
         save();
         closeModal();
         renderCurrentTab();
@@ -1658,15 +1690,134 @@ function renderFeed() {
 
 function renderStoriesBar() {
     const data = getCharData();
-    if (!data || data.npcs.length === 0) return "";
-    return '<div class="stories">' +
-        data.npcs.map(n => `<div class="story" data-npc="${n.id}">
-            <div class="story-ring"><img src="${escapeHtml(n.avatar)}" onerror="this.src='${defaultAvatar(n.name)}'"/></div>
-            <div class="story-name">${escapeHtml(n.username)}</div>
-            ${n.role ? `<div class="npc-role">${escapeHtml(n.role)}</div>` : ""}
-        </div>`).join("") +
-    '</div>';
+    if (!data) return "";
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    // ลบ stories เกิน 24 ชม.
+    data.stories = (data.stories || []).filter(s => now - s.timestamp < DAY);
+    // group by author
+    const authorHasStory = {};
+    data.stories.forEach(s => { authorHasStory[s.authorId] = true; });
+
+    const userName = getUserName();
+    const userAvatar = data.userProfile.avatar || defaultAvatar(userName);
+    const userHasStory = data.stories.some(s => s.isUser);
+
+    // user circle (always first)
+    let html = '<div class="stories" style="display:flex;gap:12px;padding:10px 14px;overflow-x:auto;border-bottom:1px solid #262626">';
+    html += `<div class="story" data-story-user="true" style="text-align:center;flex-shrink:0;cursor:pointer;width:68px">
+        <div style="width:60px;height:60px;border-radius:50%;padding:2px;background:${userHasStory?"linear-gradient(45deg,#f09433,#dc2743,#bc1888)":"#333"};display:flex;align-items:center;justify-content:center;position:relative">
+            <img src="${escapeHtml(userAvatar)}" style="width:54px;height:54px;border-radius:50%;object-fit:cover;border:2px solid #000" onerror="this.src='${defaultAvatar(userName)}'"/>
+            ${!userHasStory ? '<div style="position:absolute;bottom:-2px;right:-2px;width:20px;height:20px;background:#0095f6;border-radius:50%;border:2px solid #000;color:white;font-size:14px;line-height:18px;text-align:center;font-weight:700">+</div>' : ''}
+        </div>
+        <div style="font-size:10px;color:#a8a8a8;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${userHasStory ? "สตอรี่คุณ" : "สตอรี่ +"}</div>
+    </div>`;
+
+    // NPC circles
+    const enabledNpcs = data.npcs.filter(n => n.enabled !== false);
+    enabledNpcs.forEach(n => {
+        const has = authorHasStory[n.id];
+        html += `<div class="story" data-story-npc="${n.id}" style="text-align:center;flex-shrink:0;cursor:pointer;width:68px">
+            <div style="width:60px;height:60px;border-radius:50%;padding:2px;background:${has?"linear-gradient(45deg,#f09433,#dc2743,#bc1888)":"#333"};display:flex;align-items:center;justify-content:center">
+                <img src="${escapeHtml(n.avatar)}" style="width:54px;height:54px;border-radius:50%;object-fit:cover;border:2px solid #000" onerror="this.src='${defaultAvatar(n.name)}'"/>
+            </div>
+            <div style="font-size:10px;color:#a8a8a8;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(n.username)}</div>
+        </div>`;
+    });
+    html += '</div>';
+    return html;
 }
+
+// 🆕 Story viewer — fullscreen overlay
+function openStoryViewer(authorId, isUser) {
+    if (!shadowRoot) return;
+    const data = getCharData();
+    if (!data) return;
+    const stories = (data.stories || []).filter(s =>
+        isUser ? s.isUser : s.authorId === authorId
+    ).sort((a, b) => a.timestamp - b.timestamp);
+    if (stories.length === 0) {
+        if (isUser) addUserStory();
+        return;
+    }
+    let idx = 0;
+    function renderStory() {
+        const s = stories[idx];
+        const author = isUser ? { name: getUserName(), avatar: data.userProfile.avatar || defaultAvatar(getUserName()) } :
+            (findNpc(s.authorId) || { name: s.authorName, avatar: s.authorAvatar });
+        showModal(`
+            <div style="background:#000;margin:-20px;padding:0;position:relative;min-height:400px">
+                <div style="display:flex;gap:4px;padding:8px 8px 0">${stories.map((_, i) => `<div style="flex:1;height:3px;border-radius:2px;background:${i<=idx?"white":"rgba(255,255,255,0.3)"}"></div>`).join("")}</div>
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 12px">
+                    <img src="${escapeHtml(author.avatar)}" style="width:32px;height:32px;border-radius:50%;object-fit:cover" onerror="this.src='${defaultAvatar(author.name)}'"/>
+                    <span style="color:white;font-size:13px;font-weight:600">${escapeHtml(author.name)}</span>
+                    <span style="color:#a8a8a8;font-size:11px">${timeAgo(s.timestamp)}</span>
+                    <button id="story-close" style="margin-left:auto;background:none;border:none;color:white;font-size:20px;cursor:pointer">✕</button>
+                </div>
+                <img src="${escapeHtml(s.image)}" style="width:100%;max-height:500px;object-fit:contain" onerror="this.style.display='none'"/>
+                ${s.caption ? `<div style="padding:12px;color:white;font-size:14px">${escapeHtml(s.caption)}</div>` : ""}
+                <div style="display:flex;padding:8px 12px 16px;gap:8px">
+                    ${idx > 0 ? '<button id="story-prev" style="flex:1;padding:8px;background:#262626;color:white;border:none;border-radius:8px;cursor:pointer">◀ ก่อน</button>' : '<div style="flex:1"></div>'}
+                    ${idx < stories.length - 1 ? '<button id="story-next" style="flex:1;padding:8px;background:#262626;color:white;border:none;border-radius:8px;cursor:pointer">ถัดไป ▶</button>' : '<div style="flex:1"></div>'}
+                </div>
+            </div>
+        `);
+        shadowRoot.getElementById("story-close").addEventListener("click", closeModal);
+        const prev = shadowRoot.getElementById("story-prev");
+        const next = shadowRoot.getElementById("story-next");
+        if (prev) prev.addEventListener("click", () => { idx--; renderStory(); });
+        if (next) next.addEventListener("click", () => { idx++; renderStory(); });
+    }
+    renderStory();
+}
+
+// 🆕 User story creation
+function addUserStory() {
+    showModal(`
+        <h3 style="margin:0 0 12px">📱 เพิ่มสตอรี่</h3>
+        <label style="display:block;padding:30px;background:#1a1a2e;border:2px dashed #0095f6;border-radius:12px;text-align:center;cursor:pointer;margin-bottom:12px;color:#0095f6">
+            📷 เลือกรูป
+            <input type="file" id="story-file" accept="image/*" style="display:none"/>
+        </label>
+        <img id="story-preview" style="display:none;width:100%;max-height:250px;object-fit:cover;border-radius:8px;margin-bottom:10px"/>
+        <input type="text" id="story-caption" placeholder="เขียนอะไรสักอย่าง... (ไม่บังคับ)" style="width:100%;padding:8px;background:#0d0d0d;border:1px solid #262626;border-radius:8px;color:#f5f5f5;font-size:13px;margin-bottom:14px;box-sizing:border-box"/>
+        <div style="display:flex;gap:8px">
+            <button id="story-cancel" style="flex:1;padding:10px;background:#262626;color:#f5f5f5;border:none;border-radius:8px;cursor:pointer">ยกเลิก</button>
+            <button id="story-post" style="flex:2;padding:10px;background:linear-gradient(45deg,#f09433,#dc2743,#bc1888);color:white;border:none;border-radius:8px;font-weight:700;cursor:pointer">โพสต์สตอรี่</button>
+        </div>
+    `);
+    let imgData = null;
+    shadowRoot.getElementById("story-file").addEventListener("change", (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f || f.size > 5*1024*1024) { toast("⚠ รูปใหญ่เกิน 5MB"); return; }
+        const r = new FileReader();
+        r.onload = (ev) => {
+            imgData = ev.target.result;
+            const prev = shadowRoot.getElementById("story-preview");
+            prev.src = imgData; prev.style.display = "block";
+        };
+        r.readAsDataURL(f);
+    });
+    shadowRoot.getElementById("story-cancel").addEventListener("click", closeModal);
+    shadowRoot.getElementById("story-post").addEventListener("click", () => {
+        if (!imgData) { toast("เลือกรูปก่อน"); return; }
+        const data = getCharData();
+        if (!data) return;
+        data.stories.push({
+            id: uid("story"), isUser: true,
+            authorId: "user", authorName: getUserName(),
+            authorAvatar: data.userProfile.avatar || defaultAvatar(getUserName()),
+            image: imgData,
+            caption: shadowRoot.getElementById("story-caption").value.trim(),
+            timestamp: Date.now(),
+        });
+        save();
+        closeModal();
+        renderCurrentTab();
+        toast("✓ โพสต์สตอรี่แล้ว!");
+    });
+}
+
 
 function renderPostCard(post) {
     const liked = post.userLiked;
@@ -1727,10 +1878,21 @@ function attachFeedHandlers() {
             if (data) { data.selectedProfile = npcId; renderNpcProfile(npcId); }
         });
     });
-    shadowRoot.querySelectorAll(".story").forEach(el => {
+    shadowRoot.querySelectorAll(".story[data-story-user]").forEach(el => {
         el.addEventListener("click", () => {
             const data = getCharData();
-            if (data) { data.selectedProfile = el.dataset.npc; renderNpcProfile(el.dataset.npc); }
+            const hasStory = data && data.stories.some(s => s.isUser);
+            if (hasStory) openStoryViewer(null, true);
+            else addUserStory();
+        });
+    });
+    shadowRoot.querySelectorAll(".story[data-story-npc]").forEach(el => {
+        el.addEventListener("click", () => {
+            const npcId = el.dataset.storyNpc;
+            const data = getCharData();
+            const hasStory = data && data.stories.some(s => s.authorId === npcId);
+            if (hasStory) openStoryViewer(npcId, false);
+            else { if (data) { data.selectedProfile = npcId; renderNpcProfile(npcId); } }
         });
     });
     shadowRoot.querySelectorAll(".comment-post").forEach(btn => {
@@ -2248,6 +2410,14 @@ function renderMyProfile() {
         <input class="inline-input" id="my-name" placeholder="ชื่อที่แสดง" value="${escapeHtml(up.displayName || userName)}"/>
         <label class="compose-label" style="margin-top:8px">Bio</label>
         <textarea class="inline-input" id="my-bio" rows="2" placeholder="ไบโอ...">${escapeHtml(up.bio || "")}</textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+            <div style="flex:1"><label class="compose-label" style="font-size:11px">👥 Followers</label>
+                <input class="inline-input" type="number" id="my-followers" value="${up.followers||0}" min="0"/>
+            </div>
+            <div style="flex:1"><label class="compose-label" style="font-size:11px">👤 Following</label>
+                <input class="inline-input" type="number" id="my-following" value="${up.following||0}" min="0"/>
+            </div>
+        </div>
         <button class="primary-btn" id="save-profile">💾 บันทึกโปรไฟล์</button>
 
         <h3 style="margin-top:24px;font-size:15px">📋 ตัวละครใน IG (${data.npcs.length})</h3>
@@ -2301,6 +2471,8 @@ function renderMyProfile() {
         data.userProfile.username = shadowRoot.getElementById("my-username").value.trim() || sanitizeUsername(userName);
         data.userProfile.displayName = shadowRoot.getElementById("my-name").value.trim() || userName;
         data.userProfile.bio = shadowRoot.getElementById("my-bio").value.trim();
+        data.userProfile.followers = Math.max(0, parseInt(shadowRoot.getElementById("my-followers").value) || 0);
+        data.userProfile.following = Math.max(0, parseInt(shadowRoot.getElementById("my-following").value) || 0);
         save();
         toast("✓ บันทึกโปรไฟล์แล้ว");
     });
@@ -2408,6 +2580,14 @@ function openNpcModal(npcId) {
             <label>Bio สำหรับ IG (สั้นๆ)</label>
             <input class="inline-input" id="npc-bio" value="${npc ? escapeHtml(npc.bio || "") : ""}" placeholder="bio IG"/>
         </div>
+        <div class="row" style="display:flex;gap:8px">
+            <div style="flex:1"><label style="font-size:11px">👥 Followers</label>
+                <input class="inline-input" type="number" id="npc-followers" value="${npc ? (npc.followers||0) : 500}" min="0" placeholder="1000"/>
+            </div>
+            <div style="flex:1"><label style="font-size:11px">👤 Following</label>
+                <input class="inline-input" type="number" id="npc-following" value="${npc ? (npc.following||0) : 200}" min="0" placeholder="200"/>
+            </div>
+        </div>
         <div class="row">
             <label>Role / ความสัมพันธ์</label>
             <select class="inline-input" id="npc-role" style="height:40px;cursor:pointer">
@@ -2500,6 +2680,8 @@ function openNpcModal(npcId) {
             npc.role = roleVal || npc.role;
             npc.pronounSelf = pronSelf || null;
             npc.pronounUser = pronUser || null;
+            npc.followers = Math.max(0, parseInt(shadowRoot.getElementById("npc-followers").value) || 0);
+            npc.following = Math.max(0, parseInt(shadowRoot.getElementById("npc-following").value) || 0);
             const enabledEl = shadowRoot.getElementById("npc-enabled");
             if (enabledEl) npc.enabled = enabledEl.checked;
             if (avatarData) npc.avatar = avatarData;
@@ -2510,6 +2692,8 @@ function openNpcModal(npcId) {
             newNpc.role = roleVal || newNpc.role;
             newNpc.pronounSelf = pronSelf || null;
             newNpc.pronounUser = pronUser || null;
+            newNpc.followers = Math.max(0, parseInt(shadowRoot.getElementById("npc-followers").value) || 500);
+            newNpc.following = Math.max(0, parseInt(shadowRoot.getElementById("npc-following").value) || 200);
             if (avatarData) newNpc.avatar = avatarData;
         }
         save();
